@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>Off-corridor test route</name>
+    <Placemark>
+      <LineString>
+        <coordinates>
+          77.65000,13.05000,0
+          77.65500,13.05500,0
+          77.66000,13.06000,0
+        </coordinates>
+      </LineString>
+    </Placemark>
+  </Document>
+</kml>
