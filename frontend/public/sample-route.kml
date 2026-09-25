@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>Bengaluru planned route</name>
+    <Placemark>
+      <name>Simulator corridor</name>
+      <LineString>
+        <coordinates>
+          77.59460,12.97160,0
+          77.59605,12.97224,0
+          77.59748,12.97305,0
+          77.59862,12.97412,0
+          77.59939,12.97531,0
+          77.59974,12.97662,0
+          77.59930,12.97787,0
+          77.59817,12.97871,0
+          77.59663,12.97882,0
+          77.59518,12.97816,0
+          77.59437,12.97691,0
+          77.59408,12.97534,0
+          77.59420,12.97377,0
+        </coordinates>
+      </LineString>
+    </Placemark>
+  </Document>
+</kml>
