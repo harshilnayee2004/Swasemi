@@ -11,14 +11,22 @@ SMTP_USERNAME = os.getenv("SMTP_USERNAME", "")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 SMTP_FROM = os.getenv("ALERT_FROM_EMAIL", SMTP_USERNAME or "alerts@localhost")
 SMTP_USE_TLS = os.getenv("SMTP_USE_TLS", "true").lower() in {"1", "true", "yes"}
+UNDELIVERABLE_DOMAINS = {"example.com", "example.org", "example.net", "localhost", "invalid"}
 
 
 def smtp_configured() -> bool:
     return bool(SMTP_HOST and SMTP_FROM)
 
 
+def _deliverable(address: str) -> bool:
+    if "@" not in address:
+        return False
+    domain = address.rsplit("@", 1)[-1].lower()
+    return domain not in UNDELIVERABLE_DOMAINS
+
+
 def send_email(to_addresses: list[str], subject: str, body: str) -> bool:
-    recipients = [address for address in to_addresses if address]
+    recipients = [address for address in to_addresses if address and _deliverable(address)]
     if not recipients:
         logger.warning("No recipients for alert email")
         return False

@@ -1,5 +1,28 @@
 export type Role = 'user' | 'super_admin'
 
+export interface Organization {
+  id: number
+  name: string
+  created_at: string | null
+}
+
+export interface Invite {
+  id: number
+  token: string
+  org_id: number
+  org_name: string
+  email: string | null
+  invite_url: string
+  expires_at: string
+  used_at: string | null
+}
+
+export interface InvitePublic {
+  org_name: string
+  email: string | null
+  expires_at: string
+}
+
 export interface CurrentUser {
   id: number
   email: string
@@ -17,6 +40,7 @@ export interface Trip {
   vehicle_id: number
   org_id: number
   status: 'active' | 'completed'
+  force_deviate: boolean
   started_at: string
   ended_at: string | null
 }
@@ -31,6 +55,21 @@ export interface RouteOut {
   trip_id: number
   point_count: number
   points: RoutePoint[]
+}
+
+export interface PlannedRouteOut {
+  vehicle_id: number
+  point_count: number
+  points: RoutePoint[]
+}
+
+export interface VehicleRecord {
+  id: number
+  org_id: number
+  name: string
+  device_id: string
+  org_name: string | null
+  created_at: string | null
 }
 
 export interface FleetAlert {
@@ -73,6 +112,18 @@ export interface LiveVehicle {
   elevation: number | null
   latitude: number | null
   longitude: number | null
+}
+
+export interface TrailPoint {
+  lat: number
+  lng: number
+  t: number
+}
+
+export interface VehicleTrail {
+  tripId: number
+  points: TrailPoint[]
+  ended: boolean
 }
 
 export type ConnectionState = 'connecting' | 'connected' | 'disconnected'
