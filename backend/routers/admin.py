@@ -1,10 +1,37 @@
+import os
+import secrets
+from datetime import datetime, timedelta, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from auth import get_current_super_admin, hash_password
 from database import get_db
-from models import Organization, User
-from schemas import OrganizationCreate, OrganizationOut, UserCreate, UserOut
+from models import Invite, Organization, User
+from schemas import InviteCreate, InviteOut, OrganizationCreate, OrganizationOut, UserCreate, UserOut
+
+INVITE_HOURS = int(os.getenv("INVITE_EXPIRE_HOURS", "72"))
+
+
+def _invite_url(token: str) -> str:
+    origin = os.getenv("FRONTEND_PUBLIC_URL") or os.getenv(
+        "FRONTEND_ORIGINS",
+        "http://localhost:5173",
+    ).split(",")[0].strip()
+    return f"{origin.rstrip('/')}/?invite={token}"
+
+
+def _invite_out(invite: Invite, org_name: str) -> InviteOut:
+    return InviteOut(
+        id=invite.id,
+        token=invite.token,
+        org_id=invite.org_id,
+        org_name=org_name,
+        email=invite.email,
+        invite_url=_invite_url(invite.token),
+        expires_at=invite.expires_at,
+        used_at=invite.used_at,
+    )
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -76,3 +103,42 @@ def list_organization_users(
             detail="Organization not found",
         )
     return db.query(User).filter(User.org_id == org_id).order_by(User.id).all()
+
+
+@router.post("/invites", response_model=InviteOut, status_code=status.HTTP_201_CREATED)
+def create_invite(
+    body: InviteCreate,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_super_admin),
+):
+    org = db.query(Organization).filter(Organization.id == body.org_id).first()
+    if org is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found")
+    if body.email:
+        existing = db.query(User).filter(User.email == body.email).first()
+        if existing is not None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already in use")
+    invite = Invite(
+        token=secrets.token_urlsafe(24),
+        org_id=org.id,
+        email=body.email,
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=INVITE_HOURS),
+    )
+    db.add(invite)
+    db.commit()
+    db.refresh(invite)
+    return _invite_out(invite, org.name)
+
+
+@router.get("/invites", response_model=list[InviteOut])
+def list_invites(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_super_admin),
+):
+    rows = (
+        db.query(Invite, Organization.name)
+        .join(Organization, Invite.org_id == Organization.id)
+        .order_by(Invite.id.desc())
+        .all()
+    )
+    return [_invite_out(invite, org_name) for invite, org_name in rows]

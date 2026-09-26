@@ -9,8 +9,8 @@ from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 
 from database import get_db
-from models import User
-from schemas import LoginRequest, TokenResponse, UserOut
+from models import Invite, Organization, User
+from schemas import InvitePublic, JoinRequest, LoginRequest, TokenResponse, UserOut
 
 JWT_SECRET = os.getenv("JWT_SECRET", "dev-insecure-change-me-use-32b+x")
 JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
@@ -111,3 +111,45 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
 @router.get("/me", response_model=UserOut)
 def me(user: User = Depends(get_current_user)):
     return user
+
+
+def _open_invite(db: Session, token: str) -> Invite:
+    invite = db.query(Invite).filter(Invite.token == token).first()
+    if invite is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invite not found")
+    expires = invite.expires_at
+    if expires is not None and expires.tzinfo is None:
+        expires = expires.replace(tzinfo=timezone.utc)
+    if invite.used_at is not None or (expires is not None and expires < datetime.now(timezone.utc)):
+        raise HTTPException(status_code=status.HTTP_410_GONE, detail="Invite is no longer valid")
+    return invite
+
+
+@router.get("/invites/{token}", response_model=InvitePublic)
+def read_invite(token: str, db: Session = Depends(get_db)):
+    invite = _open_invite(db, token)
+    org = db.query(Organization).filter(Organization.id == invite.org_id).first()
+    return InvitePublic(org_name=org.name if org else "Organization", email=invite.email, expires_at=invite.expires_at)
+
+
+@router.post("/join", response_model=TokenResponse)
+def join(body: JoinRequest, db: Session = Depends(get_db)):
+    invite = _open_invite(db, body.token)
+    email = invite.email or body.email
+    if email is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email is required")
+    if invite.email and body.email and body.email != invite.email:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This invite is for a different email")
+    if db.query(User).filter(User.email == email).first() is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already in use")
+    user = User(
+        email=email,
+        password_hash=hash_password(body.password),
+        role="user",
+        org_id=invite.org_id,
+    )
+    invite.used_at = datetime.now(timezone.utc)
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return TokenResponse(access_token=create_access_token(user.id, user.role, user.org_id))
