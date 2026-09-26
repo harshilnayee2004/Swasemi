@@ -56,6 +56,36 @@ class UserOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class InviteCreate(BaseModel):
+    org_id: int
+    email: Optional[EmailStr] = None
+
+
+class InviteOut(BaseModel):
+    id: int
+    token: str
+    org_id: int
+    org_name: str
+    email: Optional[EmailStr] = None
+    invite_url: str
+    expires_at: datetime
+    used_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class InvitePublic(BaseModel):
+    org_name: str
+    email: Optional[EmailStr] = None
+    expires_at: datetime
+
+
+class JoinRequest(BaseModel):
+    token: str
+    password: str
+    email: Optional[EmailStr] = None
+
+
 class VehicleCreate(BaseModel):
     name: str
 
@@ -76,6 +106,7 @@ class TripOut(BaseModel):
     vehicle_id: int
     org_id: int
     status: str
+    force_deviate: bool = False
     started_at: datetime
     ended_at: Optional[datetime] = None
 
@@ -92,6 +123,12 @@ class RoutePointOut(BaseModel):
 
 class RouteOut(BaseModel):
     trip_id: int
+    point_count: int
+    points: list[RoutePointOut]
+
+
+class PlannedRouteOut(BaseModel):
+    vehicle_id: int
     point_count: int
     points: list[RoutePointOut]
 

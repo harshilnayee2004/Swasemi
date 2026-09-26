@@ -245,6 +245,36 @@ Frontend changes:
 
 Basemap note: CARTO Voyager tiles were tried for a Google-Maps look but now require an API key (tiles rendered "API KEY REQUIRED"), so the map uses standard OpenStreetMap tiles. Swapping to a keyed provider is a one-line `TileLayer` change.
 
+Starting a trip now also attaches `sample-route.kml` automatically, so the planned Gandhinagar loop appears immediately instead of waiting for a manual upload. The map chrome shows a place chip (`En route` / `Stopped` / `Trip ended` / `Gandhinagar, Gujarat`), Google-style zoom buttons, and the vehicle pin turns yellow while holding and red after stop. Follow mode turns back on when a trip starts.
+
+The history panel is a map drawer, not a third grid column. Opening it hides the vehicle card so the two white sheets no longer stack on top of the path.
+
+### Manual simulator deviation and named routes — 2026-09-26
+
+There is no hardware GPS, so a live demo needed a way to send the simulated truck off the planned corridor without swapping KML files.
+
+- `Trip.force_deviate` defaults to false. `create_tables.py` still uses `create_all`, then `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` so an existing database gets the column.
+- Organization Users call `POST .../trips/{id}/deviate` and `.../deviate/reset` with the same tenant checks as start/stop. Super Admin cannot flip the flag.
+- The simulator already listed trips before publishing. That poll now reads `force_deviate`. When true, it still advances along the loop but offsets each sample perpendicular to the heading by more than `ROUTE_DEVIATION_METERS`, growing each tick. `compliance.py` is unchanged: it sees a far GPS point and fires the existing Alert/email path.
+- Two hardcoded named routes (Gandhinagar loop, Infocity corridor) are saved as CSV to `POST /vehicles/{id}/planned-route`. Starting a trip copies those points onto the trip `RoutePoint` rows. KML upload remains.
+
+The vehicle card shows **Save route**, then **Start trip**, then **Deviate** / **Deviating** (red) only after a trip is running.
+
+### User-initiated vehicles, routes, and trips — 2026-09-26
+
+Trips were still starting themselves: leftover `active` rows kept the simulator publishing, start auto-attached a named route, and the simulator created "Simulator Vehicle N" until it had three trucks.
+
+Organization Users can delete a vehicle from the card (`DELETE /vehicles/{id}`). Child alerts, readings, trip route points, trips, and planned-route points are removed first so foreign keys do not block the delete. Super Admin still cannot mutate vehicles.
+
+The intended path is now the only path:
+
+1. A User creates a vehicle by name (`POST /vehicles`).
+2. They save a planned route on that vehicle (`POST /vehicles/{id}/planned-route`).
+3. They start a trip. Start refuses unless at least two planned points exist, then copies them onto the trip.
+4. They can click **Deviate** only while that trip is active.
+
+The simulator lists existing vehicles and publishes only for trips the user started. It does not create vehicles and does not start trips. The vehicle card is stacked (title, 2×2 sensors, route, start/stop, deviate) so labels no longer collide with the Offline badge or the Start trip button. Deviation banners only show for the current active trip.
+
 ### Verification completed
 
 The following were exercised successfully:
@@ -263,7 +293,7 @@ The following were exercised successfully:
 - Redis-to-WebSocket delivery.
 - Org A live events not leaking to Org B.
 - Super Admin WebSocket snapshot seeing both organizations.
-- Simulator automatically reaching three vehicles.
+- Simulator tracking user-created vehicles only; no auto-create.
 - Simulator publishing nothing when every trip is stopped.
 - Simulator publishing exactly the active vehicle when one trip is active.
 - End-to-end simulator MQTT publication increasing persisted readings from 5 to 6.
@@ -284,6 +314,7 @@ The following were exercised successfully:
 - In-corridor telemetry creating no Alert.
 - Off-corridor telemetry creating exactly one `route_deviation` Alert.
 - SMTP left unset locally: Alert persisted, email skipped with an explicit log (configure SMTP to send for real).
+- Gmail delivered `Route deviation: Truck A1` to `harshilnayee2004@gmail.com`. A bounce for `usera@example.com` was expected (`example.com` does not accept mail); the mailer now skips those demo domains.
 - Frontend TypeScript check succeeding after the route UI.
 - Trip readings JSON returning tenant-scoped samples.
 - CSV export returning a header plus one row per reading.
@@ -292,7 +323,12 @@ The following were exercised successfully:
 - Simulator publishing Gandhinagar coordinates (23.2°N, 72.6°E) for three vehicles with the densified loop (354 points).
 - Browser: Truck A1 gliding along GH Road / Sector 11 with a rotated heading arrow, a growing blue trail from a green start dot, and a live strip reading 955 m · 1m 39s · 37 km/h.
 - Browser: Stop trip turned the trail and arrow grey, added a red end marker, kept the path visible, showed "Trip ended · 1.1 km · 1m 54s", and the vehicle dropped to Offline after the 20 s grace period while the other two kept moving.
+- Starting a trip auto-uploaded `sample-route.kml` (`POST .../trips/16/route` 200) and showed "9 points loaded" without a manual upload.
+- Place chip switched from "En route · Gandhinagar" while moving to "Trip ended" after stop; zoom +/− and Follow controls stayed usable.
 - Frontend TypeScript check passing after the map rework.
+- `POST .../deviate` sets `force_deviate=true`; Org B receives `403` on Org A's trip.
+- Named-route CSV upload uses the existing `POST .../route` parser.
+- Browser: Start trip stays disabled until a planned route is saved. Created `Demo Truck`, saved Gandhinagar loop (9 points), then started the trip. Simulator stayed idle until that click, then published only Demo Truck. Deviate appeared after start and flipped to Deviating. Card layout no longer overlaps title, route, or Start trip.
 
 Local test accounts created during verification:
 
@@ -333,7 +369,7 @@ These are local development credentials only. Production credentials and `JWT_SE
 ### Backend routers
 
 - `routers/admin.py`: Super Admin organization/user provisioning.
-- `routers/vehicles.py`: tenant-safe vehicle creation and listing.
+- `routers/vehicles.py`: tenant-safe vehicle creation, listing, and delete.
 - `routers/trips.py`: tenant-safe start, stop, trip history, readings, CSV export, route upload/read, and alert listing.
 - `routers/ws.py`: JWT-authenticated real-time WebSocket endpoint.
 - `routers/__init__.py`: marks the directory as a Python package.
@@ -413,6 +449,7 @@ Local defaults exist for convenience. Deployment must override secrets and servi
 
 - Deploy a public URL and email reviewer logins plus this document.
 - Production `JWT_SECRET` and SMTP credentials so deviation mail actually sends.
+- Super Admin now has an in-app Platform panel: create organizations and mint invite links. A person can join only with a Super Admin link (`/?invite=...`). There is still no public signup.
 - Optional automated tests.
 
 ## 7. Known development notes
@@ -433,4 +470,201 @@ For every future change, add:
 5. Security/tenant impact.
 6. Verification performed.
 7. Any known limitation or next step.
+
+## 9. Interview manual
+
+Added 2026-09-26. This is the spoken walkthrough: how to start the stack, what each folder is for, what the dashboard numbers mean, and how frontend and backend share work.
+
+### 9.1 What the product is
+
+Swasemi is a multi-tenant fleet telemetry platform.
+
+- An organization User sees only that organization's vehicles.
+- A Super Admin sees every organization, can invite people, and cannot start or stop trips.
+- There is no public signup. Join is invite-only (`/?invite=...`).
+- A vehicle only stores GPS and sensor samples while a User has started a trip.
+- Devices (here a Python simulator) publish over public MQTT (`broker.emqx.io`). The API writes accepted samples to PostgreSQL, publishes a live event through Redis, and the dashboard receives that event on a WebSocket.
+
+Required story for an interviewer: **MQTT → trip gate in FastAPI → PostgreSQL + Redis → WebSocket → React map**.
+
+### 9.2 How to start everything (Windows)
+
+Docker Desktop must be running first. Compose only starts **PostgreSQL** and **Redis**. The API, simulator, and Vite app are local processes.
+
+From `C:\Projects\Swasemi`:
+
+```powershell
+docker compose up -d
+```
+
+That maps:
+
+| Service | Container port | Host port | Why |
+| --- | --- | --- | --- |
+| PostgreSQL 16 | 5432 | **5433** | Avoids clashing with a local Postgres on 5432 |
+| Redis 7 | 6379 | **6379** | Pub/sub for live dashboard events |
+
+Database name `fleet`, user/password `swasemi` / `swasemi_dev` (see `docker-compose.yml` and `backend/.env`).
+
+**First-time backend** (from `backend/`):
+
+```powershell
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+copy .env.example .env
+.\venv\Scripts\python.exe create_tables.py
+.\venv\Scripts\python.exe -m uvicorn main:app --host 127.0.0.1 --port 8000
+```
+
+`create_tables.py` runs SQLAlchemy `create_all` and adds `trips.force_deviate` if the table already existed. There is no Alembic in this assignment.
+
+**Frontend** (from `frontend/`):
+
+```powershell
+npm install
+npm run dev
+```
+
+Open `http://localhost:5173/`. Vite talks to `http://127.0.0.1:8000` unless `VITE_API_URL` is set.
+
+**Simulator** (from `backend/`, after the API is up):
+
+```powershell
+$env:SIMULATOR_EMAIL='usera@example.com'
+$env:SIMULATOR_PASSWORD='usera-pass'
+.\venv\Scripts\python.exe simulator.py
+```
+
+The simulator **does not create vehicles and does not start trips**. It lists vehicles and publishes MQTT only while a trip is `active`. If nothing is running it logs `No active trips; waiting`.
+
+Health check: `http://127.0.0.1:8000/health` should return `{"status":"ok"}`.
+
+### 9.3 Demo logins
+
+| Role | Email | Password | Can do |
+| --- | --- | --- | --- |
+| Super Admin | `admin@example.com` | `adminpass` | See all orgs, Admin panel, invites. No start/stop/deviate. |
+| Org A User | `usera@example.com` | `usera-pass` | Vehicles, routes, trips, deviate for Org A only. |
+| Org B User | `userb@example.com` | `userb-pass` | Same for Org B. Gets `403` on Org A. |
+
+`admin@astermedcare.com` is not seeded. These passwords are local only.
+
+### 9.4 Operator path (what you demo)
+
+1. Sign in as an organization User.
+2. Name a vehicle in the sidebar and click **Add** (`POST /vehicles`). **Delete vehicle** on the card removes that truck and its trips/readings (`DELETE /vehicles/{id}`). Only organization Users can delete, and only their own org.
+3. On the card: pick a named route or **Upload KML**, then **Save route** (`POST /vehicles/{id}/planned-route`). Points sit on `vehicle_route_points` until a trip starts.
+4. **Start trip** stays disabled until at least two planned points exist. Start copies those points onto trip `route_points` (`POST /vehicles/{id}/trips/start`).
+5. The simulator then publishes GPS + temperature/humidity/dew point/elevation on `swasemi/fleet/{device_id}/readings`.
+6. **Deviate** (`POST .../trips/{id}/deviate`) sets `Trip.force_deviate`. The simulator offsets GPS sideways past the 200 m limit so `compliance.py` can create an Alert and email.
+7. **Stop trip** completes the trip. Ingest drops further MQTT samples for that vehicle.
+
+Super Admin never sees Add / Save route / Start / Deviate.
+
+### 9.5 Folders and who owns what
+
+| Path | Meaning |
+| --- | --- |
+| `docker-compose.yml` | Local Postgres + Redis only |
+| `PROJECT_HISTORY.md` | This file: history + interview notes |
+| `backend/main.py` | FastAPI app, CORS, MQTT + Redis lifespan |
+| `backend/database.py` | Engine, `SessionLocal`, `get_db` |
+| `backend/models.py` | Org, User, Invite, Vehicle, VehicleRoutePoint, Trip, Reading, RoutePoint, Alert |
+| `backend/schemas.py` | Pydantic v2 I/O |
+| `backend/auth.py` | Login, JWT (`sub`, `role`, `org_id`), `/auth/join` |
+| `backend/create_tables.py` | `create_all` + `force_deviate` ALTER |
+| `backend/mqtt_ingest.py` | Subscribe, parse, **active-trip gate**, persist Reading, Redis publish, compliance |
+| `backend/realtime.py` | Snapshot + reading/alert payloads, Redis fan-out, tenant filter on WS |
+| `backend/compliance.py` | Distance from GPS to planned polyline; Alert + SMTP |
+| `backend/geo.py` | KML/CSV parse, haversine, **distance-to-route** (backend) |
+| `backend/emailer.py` | SMTP; skips `@example.com` / localhost |
+| `backend/simulator.py` | Fake trucks on a Gandhinagar loop; offset when `force_deviate` |
+| `backend/routers/vehicles.py` | Create/list/delete + planned-route GET/POST |
+| `backend/routers/trips.py` | Start/stop, deviate, history, readings, CSV, trip route |
+| `backend/routers/admin.py` | Orgs, users, invites |
+| `backend/routers/ws.py` | `ws://.../ws?token=` |
+| `frontend/src/App.tsx` | Login, dashboard, create vehicle, save route, start/stop, deviate, card UI |
+| `frontend/src/api.ts` | HTTP client |
+| `frontend/src/useFleetSocket.ts` | Live vehicles, trails, alerts, reconnect |
+| `frontend/src/FleetMap.tsx` | Leaflet, trail, planned route, **Follow** |
+| `frontend/src/geo.ts` | **Trip distance / duration / speed** (frontend) |
+| `frontend/src/namedRoutes.ts` | Gandhinagar loop + Infocity corridor as CSV |
+| `frontend/src/TripHistory.tsx` | Past trips, temp chart, CSV download |
+| `frontend/src/SuperAdmin.tsx` | Invite panel |
+| `frontend/public/sample-route.kml` | Example planned corridor |
+| `frontend/public/off-route.kml` | Far-away Ahmedabad line (old demo file) |
+
+Two different “distance” implementations live in two `geo` files. Do not mix them up in an interview.
+
+### 9.6 The four sensor blocks (top of the vehicle card)
+
+These are the last MQTT reading for that vehicle, stored on `readings` and shown live.
+
+| Block | Field | Meaning |
+| --- | --- | --- |
+| Temperature | `temperature` | °C from the device (simulator: ~30–36 °C) |
+| Humidity | `humidity` | Relative humidity % |
+| Dew point | `dew_point` | Simulator uses a simple approximation from T and humidity |
+| Elevation | `elevation` | Metres above sea level (Gandhinagar ~80 m) |
+
+They are **not** trip statistics. A stopped vehicle can still show the last sample until it ages out. **Online** means `last_seen` is within 20 seconds (`ONLINE_GRACE_MS` in `App.tsx`). After that the badge is Offline even if old numbers remain.
+
+### 9.7 The four trip blocks (blue strip)
+
+These appear after a live trail has at least two GPS points. Computed only on the frontend in `frontend/src/geo.ts` → `summarizeTrail`. They are **not** stored as their own columns.
+
+| Block | Meaning | How it is calculated |
+| --- | --- | --- |
+| **Distance** | How far the truck has actually driven on this trip | Sum of haversine (great-circle) metres between consecutive trail points. Shown as `m` or `km`. |
+| **Duration** | How long the trip has been recording | Last point timestamp minus first point timestamp. |
+| **Speed** | Instant-ish speed, not average for the whole trip | Haversine over the **last five** points, converted to km/h. Below ~4 km/h the UI says the trip is active but stopped (traffic light). |
+| **Samples** | How many GPS points are in the live trail buffer | Count of points (capped around 4000 in the socket hook). |
+
+**Distance (blue strip) is path length.** It answers “how far did we drive?”
+
+**Deviation metres (pink banner) is a different number.** Backend `distance_to_route_m` in `backend/geo.py` measures how far the *current* GPS is from the nearest segment of the **planned** polyline. If that is over `ROUTE_DEVIATION_METERS` (default **200 m**) and the 10-minute cooldown has passed, `compliance.py` writes an `Alert` and may email org users. That is “how far off the planned road?”, not “how far have we travelled?”
+
+### 9.8 Follow / Following (map only, no backend)
+
+File: `frontend/src/FleetMap.tsx`. There is no API for this.
+
+- State is a boolean `follow`, default `true`.
+- The button label is **Following** when on, **Follow** when off.
+- While Following, if the selected vehicle has an **active** trip, the map pans so the marker stays in view (`FollowVehicle` + `panTo`).
+- Dragging the map turns follow **off** (`dragstart` → `setFollow(false)`). That is “unfollow”.
+- Starting or stopping a trip changes `followToken` in `App.tsx` (`vehicleId-tripId`), which turns follow **back on**.
+- Zoom +/− never talks to the server.
+
+Interview line: “Follow is a camera mode on the Leaflet map. Telemetry does not depend on it.”
+
+### 9.9 Map colours (say this if they ask)
+
+- Thick **green** line: planned route (`route_points` or saved planned points).
+- **Blue** line with white casing: live GPS trail for the current trip. Grey if the trip ended.
+- Green dot: trip start. Red dot: trip end after stop.
+- Dashed grey: a historical trip selected in the history drawer.
+- Pin: blue moving, yellow holding, grey offline, red after trip ended.
+
+### 9.10 Backend path of one reading
+
+1. Simulator (or a real device) publishes JSON to `swasemi/fleet/{device_id}/readings`.
+2. `mqtt_ingest.py` looks up the vehicle by `device_id`.
+3. If there is no `Trip` with `status=active` for that vehicle, the message is dropped. **Server is the gate.**
+4. Otherwise a `Reading` row is written (`trip_id`, `vehicle_id`, `org_id` copied from the vehicle/trip, never from the payload).
+5. `evaluate_route_compliance` may create an `Alert`.
+6. `publish_telemetry` sends a JSON event on Redis channel `fleet:telemetry`.
+7. `redis_fanout_loop` in `realtime.py` broadcasts to WebSocket clients whose JWT `org_id` matches (or Super Admin).
+8. `useFleetSocket` merges the reading into the vehicle list and appends a trail point.
+
+JWT is a Bearer header on HTTP and `?token=` on the WebSocket. Claims: `sub`, `role`, `org_id`.
+
+### 9.11 Roles in one sentence each
+
+- **User**: scoped to one `org_id`. Create vehicles, save planned routes, start/stop, deviate, see history/CSV for that org.
+- **Super Admin**: `org_id` is null. Sees all snapshots, creates orgs and invite links. Cannot operate trips.
+
+### 9.12 One-minute verbal script
+
+“Users belong to an org; Super Admin does not. Invite only. I create a vehicle, save a planned route, then start a trip. MQTT samples are stored only while that trip is active. Live UI is Redis to WebSocket. Distance on the blue strip is the sum of GPS hops. The deviation email uses a different distance: metres off the planned polyline, 200 m limit. Follow just keeps the map camera on the truck. Super Admin can watch but cannot start the truck.”
 

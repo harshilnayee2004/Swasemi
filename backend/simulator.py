@@ -28,6 +28,7 @@ PUBLISH_INTERVAL_SECONDS = float(os.getenv("SIMULATOR_INTERVAL_SECONDS", "2"))
 MAX_CYCLES = int(os.getenv("SIMULATOR_MAX_CYCLES", "0"))
 # Distance travelled per publish tick. 30 m every 2 s is roughly 55 km/h city driving.
 STEP_METERS = float(os.getenv("SIMULATOR_STEP_METERS", "30"))
+DEVIATION_METERS = float(os.getenv("ROUTE_DEVIATION_METERS", "200"))
 EARTH_RADIUS_M = 6_371_000
 
 MQTT_HOST = os.getenv("MQTT_HOST", "broker.emqx.io")
@@ -60,6 +61,30 @@ def _haversine_m(a: tuple[float, float], b: tuple[float, float]) -> float:
     lat2, lon2 = map(math.radians, b)
     h = math.sin((lat2 - lat1) / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin((lon2 - lon1) / 2) ** 2
     return 2 * EARTH_RADIUS_M * math.asin(min(1.0, math.sqrt(h)))
+
+
+def _destination(lat: float, lon: float, bearing_deg: float, distance_m: float) -> tuple[float, float]:
+    bearing = math.radians(bearing_deg)
+    lat1 = math.radians(lat)
+    lon1 = math.radians(lon)
+    angular = distance_m / EARTH_RADIUS_M
+    lat2 = math.asin(
+        math.sin(lat1) * math.cos(angular) + math.cos(lat1) * math.sin(angular) * math.cos(bearing)
+    )
+    lon2 = lon1 + math.atan2(
+        math.sin(bearing) * math.sin(angular) * math.cos(lat1),
+        math.cos(angular) - math.sin(lat1) * math.sin(lat2),
+    )
+    return math.degrees(lat2), math.degrees(lon2)
+
+
+def _bearing_deg(a: tuple[float, float], b: tuple[float, float]) -> float:
+    lat1, lon1 = map(math.radians, a)
+    lat2, lon2 = map(math.radians, b)
+    dlon = lon2 - lon1
+    y = math.sin(dlon) * math.cos(lat2)
+    x = math.cos(lat1) * math.sin(lat2) - math.sin(lat1) * math.cos(lat2) * math.cos(dlon)
+    return (math.degrees(math.atan2(y, x)) + 360) % 360
 
 
 def densify(waypoints: list[tuple[float, float]], step_m: float) -> list[tuple[float, float]]:
@@ -121,22 +146,16 @@ class ApiClient:
         )
         self.token = response["access_token"]
 
-    def ensure_vehicles(self, count: int) -> list[dict[str, Any]]:
+    def list_vehicles(self) -> list[dict[str, Any]]:
         vehicles = self._request("GET", "/vehicles")
-        missing = count - len(vehicles)
-        for _ in range(missing):
-            vehicles.append(
-                self._request(
-                    "POST",
-                    "/vehicles",
-                    {"name": f"Simulator Vehicle {len(vehicles) + 1}"},
-                )
-            )
-        return vehicles[:count]
+        return vehicles if isinstance(vehicles, list) else []
 
     def has_active_trip(self, vehicle_id: int) -> bool:
+        return self.active_trip(vehicle_id) is not None
+
+    def active_trip(self, vehicle_id: int) -> dict[str, Any] | None:
         trips = self._request("GET", f"/vehicles/{vehicle_id}/trips")
-        return any(trip["status"] == "active" for trip in trips)
+        return next((trip for trip in trips if trip["status"] == "active"), None)
 
 
 class SimulatedVehicle:
@@ -148,15 +167,23 @@ class SimulatedVehicle:
         # Spread the fleet evenly around the loop.
         self.position = (route_index * len(self.route) // max(1, VEHICLE_COUNT)) % len(self.route)
         self.sample_number = 0
+        self.deviate_ticks = 0
 
-    def next_reading(self) -> dict[str, Any]:
+    def next_reading(self, force_deviate: bool = False) -> dict[str, Any]:
         # Occasionally hold position for a tick, like a signal or traffic stop.
         if random.random() > 0.08:
             self.position = (self.position + 1) % len(self.route)
         latitude, longitude = self.route[self.position]
-        # ~2 m of GPS noise.
-        latitude += random.uniform(-0.00002, 0.00002)
-        longitude += random.uniform(-0.00002, 0.00002)
+        nxt = self.route[(self.position + 1) % len(self.route)]
+        if force_deviate:
+            self.deviate_ticks += 1
+            offset_m = DEVIATION_METERS + 40 + self.deviate_ticks * 15
+            heading = _bearing_deg((latitude, longitude), nxt)
+            latitude, longitude = _destination(latitude, longitude, heading + 90, offset_m)
+        else:
+            self.deviate_ticks = 0
+            latitude += random.uniform(-0.00002, 0.00002)
+            longitude += random.uniform(-0.00002, 0.00002)
         self.sample_number += 1
 
         phase = self.sample_number / 5
@@ -212,20 +239,10 @@ def run() -> None:
             "Set SIMULATOR_EMAIL and SIMULATOR_PASSWORD to an organization User. "
             "Super Admin credentials cannot operate vehicles."
         )
-    if VEHICLE_COUNT < 3:
-        raise SystemExit("SIMULATOR_VEHICLE_COUNT must be at least 3")
-
     api = ApiClient(API_URL, EMAIL, PASSWORD)
     api.login()
-    vehicles = [
-        SimulatedVehicle(vehicle, index)
-        for index, vehicle in enumerate(api.ensure_vehicles(VEHICLE_COUNT))
-    ]
-    logger.info(
-        "Ready with %s vehicles: %s",
-        len(vehicles),
-        ", ".join(f"{vehicle.name} ({vehicle.device_id})" for vehicle in vehicles),
-    )
+    fleet: dict[int, SimulatedVehicle] = {}
+    logger.info("Simulator waiting for user-created vehicles and started trips")
 
     mqtt_client = create_mqtt_client()
     stopping = False
@@ -241,13 +258,27 @@ def run() -> None:
     try:
         while not stopping and (MAX_CYCLES == 0 or cycle < MAX_CYCLES):
             cycle += 1
+            try:
+                listed = api.list_vehicles()
+            except ApiError as exc:
+                logger.error("Could not list vehicles: %s", exc)
+                if not stopping:
+                    time.sleep(PUBLISH_INTERVAL_SECONDS)
+                continue
+            for index, raw in enumerate(listed):
+                vehicle_id = int(raw["id"])
+                if vehicle_id not in fleet:
+                    fleet[vehicle_id] = SimulatedVehicle(raw, index)
+                    logger.info("Tracking %s (%s)", raw["name"], raw["device_id"])
             active_count = 0
-            for vehicle in vehicles:
+            for raw in listed:
+                vehicle = fleet[int(raw["id"])]
                 try:
-                    if not api.has_active_trip(vehicle.id):
+                    trip = api.active_trip(vehicle.id)
+                    if trip is None:
                         continue
                     active_count += 1
-                    payload = vehicle.next_reading()
+                    payload = vehicle.next_reading(force_deviate=bool(trip.get("force_deviate")))
                     topic = MQTT_TOPIC_TEMPLATE.format(device_id=vehicle.device_id)
                     result = mqtt_client.publish(topic, json.dumps(payload), qos=1)
                     result.wait_for_publish(timeout=10)

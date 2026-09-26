@@ -1,4 +1,5 @@
 from sqlalchemy import (
+    Boolean,
     Column,
     DateTime,
     Float,
@@ -17,6 +18,18 @@ class Organization(Base):
 
     id = Column(Integer, primary_key=True)
     name = Column(String, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class Invite(Base):
+    __tablename__ = "invites"
+
+    id = Column(Integer, primary_key=True)
+    token = Column(String, unique=True, nullable=False, index=True)
+    org_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    email = Column(String, nullable=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    used_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -41,6 +54,16 @@ class Vehicle(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class VehicleRoutePoint(Base):
+    __tablename__ = "vehicle_route_points"
+
+    id = Column(Integer, primary_key=True)
+    vehicle_id = Column(Integer, ForeignKey("vehicles.id"), nullable=False, index=True)
+    seq = Column(Integer, nullable=False)
+    latitude = Column(Float, nullable=False)
+    longitude = Column(Float, nullable=False)
+
+
 class Trip(Base):
     __tablename__ = "trips"
 
@@ -48,6 +71,7 @@ class Trip(Base):
     vehicle_id = Column(Integer, ForeignKey("vehicles.id"), nullable=False, index=True)
     org_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
     status = Column(String, nullable=False, default="active")  # "active" or "completed"
+    force_deviate = Column(Boolean, nullable=False, default=False)
     started_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     ended_at = Column(DateTime(timezone=True), nullable=True)
 

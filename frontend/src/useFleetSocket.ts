@@ -69,7 +69,13 @@ export function useFleetSocket(token: string | null) {
       socket.onmessage = (event) => {
         const message = JSON.parse(event.data) as SnapshotMessage | ReadingMessage | AlertMessage
         if (message.type === 'snapshot') {
-          setVehicles(message.vehicles)
+          setVehicles((current) => {
+            const previous = new Map(current.map((vehicle) => [vehicle.vehicle_id, vehicle]))
+            return message.vehicles.map((vehicle) => ({
+              ...previous.get(vehicle.vehicle_id),
+              ...vehicle,
+            }))
+          })
           return
         }
         if (message.type === 'reading') {
@@ -160,5 +166,24 @@ export function useFleetSocket(token: string | null) {
     })
   }, [])
 
-  return { vehicles, alerts, trails, connection, updateTrip, seedTrail, setAlerts }
+  const addVehicle = useCallback((vehicle: LiveVehicle) => {
+    setVehicles((current) =>
+      current.some((item) => item.vehicle_id === vehicle.vehicle_id)
+        ? current
+        : [...current, vehicle],
+    )
+  }, [])
+
+  const removeVehicle = useCallback((vehicleId: number) => {
+    setVehicles((current) => current.filter((vehicle) => vehicle.vehicle_id !== vehicleId))
+    setTrails((current) => {
+      if (!(vehicleId in current)) return current
+      const next = { ...current }
+      delete next[vehicleId]
+      return next
+    })
+    setAlerts((current) => current.filter((alert) => alert.vehicle_id !== vehicleId))
+  }, [])
+
+  return { vehicles, alerts, trails, connection, updateTrip, seedTrail, setAlerts, addVehicle, removeVehicle }
 }

@@ -3,7 +3,7 @@ import { CircleMarker, MapContainer, Marker, Polyline, Popup, TileLayer, useMap,
 import { divIcon } from 'leaflet'
 import type { LatLngBoundsExpression, LatLngExpression } from 'leaflet'
 
-import { bearingDeg, haversineM } from './geo'
+import { bearingDeg, haversineM, trailMotion } from './geo'
 import type { LatLng } from './geo'
 import type { LiveVehicle, Reading, RoutePoint, VehicleTrail } from './types'
 
@@ -89,8 +89,8 @@ function useSmoothPoses(vehicles: LiveVehicle[]): Record<number, Pose> {
   return poses
 }
 
-function vehicleIcon(online: boolean, selected: boolean, heading: number) {
-  const classes = ['vehicle-pin', online ? 'online' : 'offline', selected ? 'selected' : '']
+function vehicleIcon(online: boolean, selected: boolean, heading: number, motion: string) {
+  const classes = ['vehicle-pin', online ? 'online' : 'offline', selected ? 'selected' : '', motion]
   return divIcon({
     className: 'vehicle-icon',
     html: `<div class="${classes.join(' ').trim()}" style="--heading:${heading.toFixed(0)}deg"><span class="pin-ring"></span><span class="pin-arrow"></span></div>`,
@@ -105,18 +105,20 @@ function VehicleMarker({
   pose,
   online,
   selected,
+  motion,
   onSelect,
 }: {
   vehicle: LiveVehicle
   pose: Pose
   online: boolean
   selected: boolean
+  motion: string
   onSelect: (vehicleId: number) => void
 }) {
   const roundedHeading = Math.round(pose.heading / 5) * 5
   const icon = useMemo(
-    () => vehicleIcon(online, selected, roundedHeading),
-    [online, roundedHeading, selected],
+    () => vehicleIcon(online, selected, roundedHeading, motion),
+    [motion, online, roundedHeading, selected],
   )
   return (
     <Marker
@@ -149,6 +151,16 @@ function FitOnChange({ points, fitKey }: { points: LatLng[]; fitKey: string }) {
   return null
 }
 
+function ZoomControls() {
+  const map = useMap()
+  return (
+    <div className="zoom-stack">
+      <button type="button" className="zoom-button" onClick={() => map.zoomIn()} aria-label="Zoom in">+</button>
+      <button type="button" className="zoom-button" onClick={() => map.zoomOut()} aria-label="Zoom out">−</button>
+    </div>
+  )
+}
+
 /** Keep the selected moving vehicle in view, like turn-by-turn navigation. */
 function FollowVehicle({
   target,
@@ -176,6 +188,7 @@ interface FleetMapProps {
   route: RoutePoint[]
   historyTrail: Reading[]
   liveTrail: VehicleTrail | null
+  followToken: string
   onSelect: (vehicleId: number) => void
   isOnline: (vehicle: LiveVehicle) => boolean
 }
@@ -186,11 +199,16 @@ export function FleetMap({
   route,
   historyTrail,
   liveTrail,
+  followToken,
   onSelect,
   isOnline,
 }: FleetMapProps) {
   const [follow, setFollow] = useState(true)
   const poses = useSmoothPoses(vehicles)
+
+  useEffect(() => {
+    setFollow(true)
+  }, [followToken])
 
   const positioned = vehicles.filter(
     (vehicle): vehicle is LiveVehicle & { latitude: number; longitude: number } =>
@@ -218,6 +236,15 @@ export function FleetMap({
     selected && liveTrail && !liveTrail.ended && selected.trip_id !== null
       ? poses[selected.vehicle_id]?.position ?? [selected.latitude, selected.longitude]
       : null
+  const motion = trailMotion(livePoints, liveTrail?.ended ?? false)
+  const hudLabel =
+    motion === 'moving'
+      ? 'En route · Gandhinagar'
+      : motion === 'stopped'
+        ? 'Stopped · Gandhinagar'
+        : motion === 'ended'
+          ? 'Trip ended'
+          : 'Gandhinagar, Gujarat'
 
   return (
     <div className="map-shell">
@@ -229,11 +256,12 @@ export function FleetMap({
         />
         <FitOnChange points={fitPoints} fitKey={fitKey} />
         <FollowVehicle target={followTarget} enabled={follow} onUserPan={() => setFollow(false)} />
+        <ZoomControls />
 
         {routePath.length >= 2 && (
           <Polyline
             positions={routePath}
-            pathOptions={{ color: '#188038', weight: 6, opacity: 0.45, lineCap: 'round', lineJoin: 'round' }}
+            pathOptions={{ color: '#188038', weight: 7, opacity: 0.38, lineCap: 'round', lineJoin: 'round' }}
           />
         )}
         {historyPath.length >= 2 && (
@@ -246,7 +274,7 @@ export function FleetMap({
           <>
             <Polyline
               positions={livePath}
-              pathOptions={{ color: '#ffffff', weight: 10, opacity: 0.95, lineCap: 'round', lineJoin: 'round' }}
+              pathOptions={{ color: '#ffffff', weight: 11, opacity: 0.95, lineCap: 'round', lineJoin: 'round' }}
             />
             <Polyline
               positions={livePath}
@@ -263,14 +291,14 @@ export function FleetMap({
         {liveStart && (
           <CircleMarker
             center={[liveStart.lat, liveStart.lng]}
-            radius={7}
+            radius={8}
             pathOptions={{ color: '#ffffff', weight: 3, fillColor: '#34a853', fillOpacity: 1 }}
           />
         )}
         {liveTrail?.ended && liveEnd && (
           <CircleMarker
             center={[liveEnd.lat, liveEnd.lng]}
-            radius={7}
+            radius={8}
             pathOptions={{ color: '#ffffff', weight: 3, fillColor: '#ea4335', fillOpacity: 1 }}
           />
         )}
@@ -280,6 +308,12 @@ export function FleetMap({
             position: [vehicle.latitude, vehicle.longitude] as LatLng,
             heading: 0,
           }
+          const vehicleMotion =
+            selectedVehicleId === vehicle.vehicle_id
+              ? motion
+              : vehicle.trip_id === null
+                ? 'idle'
+                : 'moving'
           return (
             <VehicleMarker
               key={vehicle.vehicle_id}
@@ -287,11 +321,25 @@ export function FleetMap({
               pose={pose}
               online={isOnline(vehicle)}
               selected={selectedVehicleId === vehicle.vehicle_id}
+              motion={vehicleMotion}
               onSelect={onSelect}
             />
           )
         })}
       </MapContainer>
+
+      <div className="map-place-chip">
+        <strong>{hudLabel}</strong>
+        <small>
+          {motion === 'moving'
+            ? 'Following the live GPS trail'
+            : motion === 'stopped'
+              ? 'Holding position — like a signal stop'
+              : motion === 'ended'
+                ? 'Start and end pins stay on the path'
+                : 'Start a trip to draw the route'}
+        </small>
+      </div>
 
       <div className="map-controls">
         <button

@@ -64,6 +64,14 @@ export function formatDistance(meters: number): string {
   return meters >= 1000 ? `${(meters / 1000).toFixed(1)} km` : `${Math.round(meters)} m`
 }
 
+export function trailMotion(points: TrailPoint[], ended: boolean): 'moving' | 'stopped' | 'ended' | 'idle' {
+  if (ended && points.length > 0) return 'ended'
+  if (points.length < 2) return 'idle'
+  const recent = summarizeTrail(points)
+  if (recent.speedKmh < 4) return 'stopped'
+  return 'moving'
+}
+
 export function formatDuration(ms: number): string {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000))
   const hours = Math.floor(totalSeconds / 3600)
