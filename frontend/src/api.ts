@@ -88,6 +88,30 @@ export function listInvites(token: string) {
   return request<Invite[]>('/admin/invites', {}, token)
 }
 
+export function createUser(
+  email: string,
+  password: string,
+  orgId: number,
+  token: string,
+) {
+  return request<CurrentUser>('/admin/users', {
+    method: 'POST',
+    body: JSON.stringify({ email, password, role: 'user', org_id: orgId }),
+  }, token)
+}
+
+export async function deleteUser(userId: number, token: string) {
+  const response = await fetch(`${API_URL}/admin/users/${userId}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null)
+    const detail = typeof payload?.detail === 'string' ? payload.detail : 'Could not delete user'
+    throw new Error(detail)
+  }
+}
+
 export function listVehicles(token: string) {
   return request<VehicleRecord[]>('/vehicles', {}, token)
 }

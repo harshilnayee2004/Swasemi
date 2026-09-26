@@ -445,17 +445,66 @@ Frontend build variables:
 
 Local defaults exist for convenience. Deployment must override secrets and service URLs.
 
-## 6. Remaining work
+## 6. Changes on 2026-09-27
+
+### One-click Windows launcher
+
+Added two files to the project root so local development starts with a single double-click instead of four manual terminals:
+
+- `start-all.bat`: A wrapper batch file that calls `start-all.ps1` with `-ExecutionPolicy Bypass`, allowing double-click execution without changing system PowerShell policy.
+- `start-all.ps1`: Orchestration script that runs in order:
+  1. Kills any stale Swasemi backend or simulator processes from a previous run.
+  2. Runs `docker compose up -d` to start PostgreSQL (port 5433) and Redis (port 6379).
+  3. Opens a new titled PowerShell window running `uvicorn main:app --host 127.0.0.1 --port 8000` from inside the venv.
+  4. Polls `http://127.0.0.1:8000/health` every second (30 s timeout) before proceeding. If the health check fails it prints a clear message explaining the likely port conflict with another Docker container (`cctv_backend`) and exits without launching the simulator against a dead backend.
+  5. Opens a new titled window running `npm run dev` from `frontend/`.
+  6. Opens a new titled window running `simulator.py` (see below). If the simulator crashes the window stays open displaying the error instead of silently closing.
+
+Files added: `start-all.bat`, `start-all.ps1`.
+
+Why: Eliminates the four-terminal startup ceremony so any reviewer or developer can start the full stack in one step after opening Docker Desktop.
+
+Security/tenant impact: None. The launcher contains only development credentials that already exist in `.env`.
+
+### Simulator extended to all organisations (Super Admin mode)
+
+**Problem identified:** The simulator was hardcoded to log in as a single organisation User (`usera@example.com`). When a new user from a different organisation (e.g. `rujukhayekaju@gmail.com`, Org 3) created a vehicle and started a trip, the simulator never saw it because `GET /vehicles` scopes results to the caller's organisation. Telemetry was never published, so the vehicle showed Offline, sensor readings showed `—`, and route-deviation emails were never triggered.
+
+**Root cause in code:** `simulator.py` line 239 contained an explicit guard: `"Super Admin credentials cannot operate vehicles."` — this error message was misleading because Super Admin does not need to start/stop trips, it only needs to call `GET /vehicles` (which already returns all vehicles for Super Admin) and `GET /vehicles/{id}/trips` (also unrestricted for Super Admin).
+
+**Fix:**
+
+- `backend/simulator.py`: Removed the Super Admin restriction block in `run()`. The simulator now accepts any valid credentials including `super_admin`. Updated the startup log message to `"Simulator started — watching ALL vehicles across all organizations"`.
+- `start-all.ps1`: Changed `SIMULATOR_EMAIL` from `usera@example.com` to `admin@example.com` and `SIMULATOR_PASSWORD` to `adminpass`.
+- `backend/.env`: Updated `SIMULATOR_EMAIL` and `SIMULATOR_PASSWORD` defaults to the Super Admin account so manual runs (`python simulator.py`) also work without extra environment variable exports.
+
+**Behaviour after fix:** One simulator instance logs in as Super Admin, calls `GET /vehicles` to get every vehicle across all organisations, then for each vehicle calls `GET /vehicles/{id}/trips` to find its active trip. If a trip is active it publishes MQTT telemetry for that vehicle. Adding a new user in any organisation, creating a vehicle, and starting a trip is sufficient — the simulator picks it up within the next 2-second tick automatically, with no restart or extra command needed.
+
+Files changed: `backend/simulator.py`, `start-all.ps1`, `backend/.env`.
+
+Security/tenant impact: The simulator uses Super Admin credentials only to read vehicle and trip state over the internal loopback API. It does not start, stop, or mutate trips. The MQTT publish path is unchanged: `mqtt_ingest.py` still validates `device_id` and enforces the active-trip gate on the server side regardless of what the simulator sends.
+
+Verification:
+- Super Admin login via API returns token.
+- `GET /vehicles` with Super Admin token returns all vehicles across Org A, Org B, and Org 3 (Raju).
+- Simulator published `kaju` telemetry (Org 3) at Gandhinagar coordinates within 2 seconds of startup.
+- Vehicle card showed live temperature, humidity, dew point, and elevation after first MQTT publish.
+- `kaju` truck began moving on the Leaflet map.
+- Second vehicle `s` (Org A) continued to receive telemetry in the same simulator run.
+
+## 7. Remaining work
 
 - Deploy a public URL and email reviewer logins plus this document.
 - Production `JWT_SECRET` and SMTP credentials so deviation mail actually sends.
 - Super Admin now has an in-app Platform panel: create organizations and mint invite links. A person can join only with a Super Admin link (`/?invite=...`). There is still no public signup.
 - Optional automated tests.
 
-## 7. Known development notes
+## 8. Known development notes
 
 - Docker Desktop on Windows was restarted after stale Docker processes prevented startup.
 - Older Uvicorn processes were stopped before loading newer MQTT/Redis code.
+- A second Uvicorn process (system Python, not venv) was found running on port 8000 alongside the correct venv process. The stale process was killed; `start-all.ps1` now explicitly kills any Swasemi venv uvicorn before restarting.
+- The `cctv_backend` Docker container on the same machine also binds port 8000. If it is running when `start-all.bat` is launched, the health check will fail and the script will print `docker stop cctv_backend` as the corrective action.
 - Source is on GitHub at `https://github.com/harshilnayee2004/Swasemi`. Local `.env` files stay untracked.
 - The Compose `version` key produces a modern Docker Compose deprecation warning but does not affect service behavior.
 

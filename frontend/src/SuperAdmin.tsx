@@ -1,7 +1,15 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 
-import { createInvite, createOrganization, listInvites, listOrganizationUsers, listOrganizations } from './api'
+import {
+  createInvite,
+  createOrganization,
+  createUser,
+  deleteUser,
+  listInvites,
+  listOrganizationUsers,
+  listOrganizations,
+} from './api'
 import type { CurrentUser, Invite, Organization } from './types'
 
 interface SuperAdminProps {
@@ -18,6 +26,11 @@ export function SuperAdmin({ token, onClose }: SuperAdminProps) {
   const [inviteEmail, setInviteEmail] = useState('')
   const [copied, setCopied] = useState('')
   const [error, setError] = useState('')
+
+  // Create user form state
+  const [newUserEmail, setNewUserEmail] = useState('')
+  const [newUserPassword, setNewUserPassword] = useState('')
+  const [deletingUserId, setDeletingUserId] = useState<number | null>(null)
 
   async function refresh() {
     const nextOrgs = await listOrganizations(token)
@@ -73,6 +86,36 @@ export function SuperAdmin({ token, onClose }: SuperAdminProps) {
     }
   }
 
+  async function addUser(event: FormEvent) {
+    event.preventDefault()
+    if (orgId === null || !newUserEmail.trim() || !newUserPassword.trim()) return
+    setError('')
+    try {
+      await createUser(newUserEmail.trim(), newUserPassword.trim(), orgId, token)
+      setNewUserEmail('')
+      setNewUserPassword('')
+      // Refresh users list
+      const updated = await listOrganizationUsers(orgId, token)
+      setUsers(updated)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Could not create user')
+    }
+  }
+
+  async function removeUser(userId: number) {
+    if (!window.confirm('Delete this user? Their vehicles and trips will remain, but they will lose access immediately.')) return
+    setError('')
+    setDeletingUserId(userId)
+    try {
+      await deleteUser(userId, token)
+      setUsers((current) => current.filter((u) => u.id !== userId))
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Could not delete user')
+    } finally {
+      setDeletingUserId(null)
+    }
+  }
+
   return (
     <aside className="admin-panel">
       <div className="history-head">
@@ -82,10 +125,11 @@ export function SuperAdmin({ token, onClose }: SuperAdminProps) {
         </div>
         <button type="button" className="text-button" onClick={onClose}>Close</button>
       </div>
-      <p className="muted">You provision organizations and invite users. Nobody can join without a link you create.</p>
+      <p className="muted">Provision organizations, create users directly, or send invite links.</p>
 
       {error && <div className="form-error compact">{error}</div>}
 
+      {/* ── Create Organization ── */}
       <form className="admin-form" onSubmit={addOrg}>
         <label>
           New organization
@@ -94,6 +138,7 @@ export function SuperAdmin({ token, onClose }: SuperAdminProps) {
         <button type="submit" className="upload-button">Create org</button>
       </form>
 
+      {/* ── Organization selector ── */}
       <label>
         Organization
         <select
@@ -104,6 +149,34 @@ export function SuperAdmin({ token, onClose }: SuperAdminProps) {
         </select>
       </label>
 
+      {/* ── Create User directly ── */}
+      <form className="admin-form" onSubmit={addUser}>
+        <label>
+          New user email
+          <input
+            type="email"
+            value={newUserEmail}
+            onChange={(event) => setNewUserEmail(event.target.value)}
+            placeholder="user@example.com"
+            required
+          />
+        </label>
+        <label>
+          Password
+          <input
+            type="password"
+            value={newUserPassword}
+            onChange={(event) => setNewUserPassword(event.target.value)}
+            placeholder="Set a password for this user"
+            required
+          />
+        </label>
+        <button type="submit" className="upload-button" disabled={orgId === null}>
+          Create user in this org
+        </button>
+      </form>
+
+      {/* ── Create Invite Link ── */}
       <form className="admin-form" onSubmit={addInvite}>
         <label>
           Invite email (optional)
@@ -111,24 +184,45 @@ export function SuperAdmin({ token, onClose }: SuperAdminProps) {
             type="email"
             value={inviteEmail}
             onChange={(event) => setInviteEmail(event.target.value)}
-            placeholder="Leave empty so anyone with the link can join this org"
+            placeholder="Leave empty so anyone with the link can join"
           />
         </label>
         <button type="submit" className="trip-button start">Create invite link</button>
       </form>
       {copied && <p className="muted">Copied: {copied}</p>}
 
+      {/* ── Users list with delete ── */}
       <div className="history-trips">
         <strong>Users in this org</strong>
         {users.length === 0 && <p className="muted">No users yet.</p>}
         {users.map((user) => (
-          <div key={user.id} className="history-trip">
-            <strong>{user.email}</strong>
-            <small>{user.role}</small>
+          <div key={user.id} className="history-trip" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+            <div>
+              <strong>{user.email}</strong>
+              <small style={{ marginLeft: '8px' }}>{user.role}</small>
+            </div>
+            <button
+              type="button"
+              onClick={() => removeUser(user.id)}
+              disabled={deletingUserId === user.id}
+              style={{
+                background: 'none',
+                border: '1px solid #e53e3e',
+                color: '#e53e3e',
+                borderRadius: '6px',
+                padding: '2px 10px',
+                cursor: 'pointer',
+                fontSize: '12px',
+                flexShrink: 0,
+              }}
+            >
+              {deletingUserId === user.id ? '...' : 'Delete'}
+            </button>
           </div>
         ))}
       </div>
 
+      {/* ── Invite links list ── */}
       <div className="history-trips">
         <strong>Invite links</strong>
         {invites.length === 0 && <p className="muted">No invites yet.</p>}

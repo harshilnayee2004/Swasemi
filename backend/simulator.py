@@ -236,13 +236,13 @@ def create_mqtt_client() -> mqtt.Client:
 def run() -> None:
     if not EMAIL or not PASSWORD:
         raise SystemExit(
-            "Set SIMULATOR_EMAIL and SIMULATOR_PASSWORD to an organization User. "
-            "Super Admin credentials cannot operate vehicles."
+            "Set SIMULATOR_EMAIL and SIMULATOR_PASSWORD before starting the simulator.\n"
+            "Use Super Admin credentials to simulate ALL organizations at once."
         )
     api = ApiClient(API_URL, EMAIL, PASSWORD)
     api.login()
     fleet: dict[int, SimulatedVehicle] = {}
-    logger.info("Simulator waiting for user-created vehicles and started trips")
+    logger.info("Simulator started — watching ALL vehicles across all organizations")
 
     mqtt_client = create_mqtt_client()
     stopping = False
