@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from auth import get_current_org_user, get_current_user
 from database import get_db
 from geo import parse_route_file
-from models import Alert, Reading, RoutePoint, Trip, User, Vehicle
+from models import Alert, Reading, RoutePoint, Trip, User, Vehicle, VehicleRoutePoint
 from schemas import AlertOut, ReadingOut, RouteOut, RoutePointOut, TripOut
 
 router = APIRouter(tags=["trips"])
@@ -58,14 +58,37 @@ def start_trip(
             detail="Vehicle already has an active trip",
         )
 
+    planned = (
+        db.query(VehicleRoutePoint)
+        .filter(VehicleRoutePoint.vehicle_id == vehicle.id)
+        .order_by(VehicleRoutePoint.seq)
+        .all()
+    )
+    if len(planned) < 2:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Save a planned route before starting a trip",
+        )
+
     trip = Trip(
         vehicle_id=vehicle.id,
         org_id=vehicle.org_id,
         status="active",
+        force_deviate=False,
         started_at=datetime.now(timezone.utc),
         ended_at=None,
     )
     db.add(trip)
+    db.flush()
+    db.add_all(
+        RoutePoint(
+            trip_id=trip.id,
+            seq=point.seq,
+            latitude=point.latitude,
+            longitude=point.longitude,
+        )
+        for point in planned
+    )
     db.commit()
     db.refresh(trip)
     return trip
@@ -89,9 +112,60 @@ def stop_trip(
 
     trip.status = "completed"
     trip.ended_at = datetime.now(timezone.utc)
+    trip.force_deviate = False
     db.commit()
     db.refresh(trip)
     return trip
+
+
+def _set_force_deviate(
+    vehicle_id: int,
+    trip_id: int,
+    enabled: bool,
+    db: Session,
+    user: User,
+) -> Trip:
+    vehicle = _get_vehicle(db, vehicle_id)
+    _require_vehicle_in_user_org(vehicle, user)
+    trip = (
+        db.query(Trip)
+        .filter(Trip.id == trip_id, Trip.vehicle_id == vehicle.id)
+        .first()
+    )
+    if trip is None or trip.org_id != user.org_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Trip not found",
+        )
+    if trip.status != "active":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Can only change deviation on an active trip",
+        )
+    trip.force_deviate = enabled
+    db.commit()
+    db.refresh(trip)
+    return trip
+
+
+@router.post("/vehicles/{vehicle_id}/trips/{trip_id}/deviate", response_model=TripOut)
+def force_deviate(
+    vehicle_id: int,
+    trip_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_org_user),
+):
+    return _set_force_deviate(vehicle_id, trip_id, True, db, user)
+
+
+@router.post("/vehicles/{vehicle_id}/trips/{trip_id}/deviate/reset", response_model=TripOut)
+def reset_deviate(
+    vehicle_id: int,
+    trip_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_org_user),
+):
+    return _set_force_deviate(vehicle_id, trip_id, False, db, user)
 
 
 @router.get("/vehicles/{vehicle_id}/trips", response_model=list[TripOut])
