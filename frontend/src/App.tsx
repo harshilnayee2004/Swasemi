@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 
-import { getAlerts, getCurrentUser, getRoute, login, startTrip, stopTrip, uploadRoute } from './api'
+import { getAlerts, getCurrentUser, getReadings, getRoute, login, startTrip, stopTrip, uploadRoute } from './api'
 import { FleetMap } from './FleetMap'
+import { formatDistance, formatDuration, summarizeTrail } from './geo'
 import { TripHistory } from './TripHistory'
 import type { CurrentUser, LiveVehicle, Reading, RoutePoint } from './types'
 import { useFleetSocket } from './useFleetSocket'
 
 const TOKEN_KEY = 'fleet_access_token'
 const ONLINE_GRACE_MS = 20_000
+const CLOCK_TICK_MS = 2_000
 
 function formatSensor(value: number | null, suffix: string) {
   return value === null ? '—' : `${value.toFixed(1)}${suffix}`
@@ -115,7 +117,7 @@ interface DashboardProps {
 }
 
 function Dashboard({ token, user, onLogout }: DashboardProps) {
-  const { vehicles, alerts, connection, updateTrip, setAlerts } = useFleetSocket(token)
+  const { vehicles, alerts, trails, connection, updateTrip, seedTrail, setAlerts } = useFleetSocket(token)
   const [selectedOrg, setSelectedOrg] = useState<number | 'all'>('all')
   const [selectedVehicleId, setSelectedVehicleId] = useState<number | null>(null)
   const [tripBusy, setTripBusy] = useState<number | null>(null)
@@ -133,7 +135,7 @@ function Dashboard({ token, user, onLogout }: DashboardProps) {
   }, [])
 
   useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 5_000)
+    const timer = window.setInterval(() => setNow(Date.now()), CLOCK_TICK_MS)
     return () => window.clearInterval(timer)
   }, [])
 
@@ -174,6 +176,18 @@ function Dashboard({ token, user, onLogout }: DashboardProps) {
     (alert) => selectedVehicle !== null && alert.vehicle_id === selectedVehicle.vehicle_id,
   )
 
+  const liveTrail = useMemo(() => {
+    if (!selectedVehicle) return null
+    const trail = trails[selectedVehicle.vehicle_id]
+    if (!trail) return null
+    if (selectedVehicle.trip_id !== null && trail.tripId !== selectedVehicle.trip_id) return null
+    return trail
+  }, [selectedVehicle, trails])
+  const tripSummary = useMemo(
+    () => (liveTrail ? summarizeTrail(liveTrail.points) : null),
+    [liveTrail],
+  )
+
   useEffect(() => {
     if (!selectedVehicle?.trip_id) {
       setRoute([])
@@ -184,6 +198,19 @@ function Dashboard({ token, user, onLogout }: DashboardProps) {
     getRoute(vehicleId, tripId, token)
       .then((result) => setRoute(result.points))
       .catch(() => setRoute([]))
+    getReadings(vehicleId, tripId, token)
+      .then((readings) =>
+        seedTrail(
+          vehicleId,
+          tripId,
+          readings.map((reading) => ({
+            lat: reading.latitude,
+            lng: reading.longitude,
+            t: Date.parse(reading.timestamp),
+          })),
+        ),
+      )
+      .catch(() => undefined)
     getAlerts(vehicleId, tripId, token)
       .then((items) =>
         setAlerts((current) => {
@@ -192,7 +219,7 @@ function Dashboard({ token, user, onLogout }: DashboardProps) {
         }),
       )
       .catch(() => undefined)
-  }, [selectedVehicle?.trip_id, selectedVehicle?.vehicle_id, setAlerts, token])
+  }, [seedTrail, selectedVehicle?.trip_id, selectedVehicle?.vehicle_id, setAlerts, token])
 
   async function toggleTrip(vehicle: LiveVehicle) {
     setTripBusy(vehicle.vehicle_id)
@@ -310,7 +337,8 @@ function Dashboard({ token, user, onLogout }: DashboardProps) {
             vehicles={visibleVehicles}
             selectedVehicleId={selectedVehicleId}
             route={historyOpen ? historyRoute : route}
-            trail={trail}
+            historyTrail={trail}
+            liveTrail={historyOpen ? null : liveTrail}
             onSelect={setSelectedVehicleId}
             isOnline={isOnline}
           />
@@ -353,6 +381,27 @@ function Dashboard({ token, user, onLogout }: DashboardProps) {
                   </button>
                 )}
               </div>
+
+              {tripSummary && liveTrail && liveTrail.points.length > 1 && (
+                <div className={`trip-progress ${liveTrail.ended ? 'ended' : ''}`}>
+                  <div>
+                    <span>{liveTrail.ended ? 'Trip ended' : 'Distance'}</span>
+                    <strong>{formatDistance(tripSummary.distanceM)}</strong>
+                  </div>
+                  <div>
+                    <span>Duration</span>
+                    <strong>{formatDuration(tripSummary.durationMs)}</strong>
+                  </div>
+                  <div>
+                    <span>Speed</span>
+                    <strong>{liveTrail.ended ? '—' : `${Math.round(tripSummary.speedKmh)} km/h`}</strong>
+                  </div>
+                  <div>
+                    <span>Samples</span>
+                    <strong>{liveTrail.points.length}</strong>
+                  </div>
+                </div>
+              )}
 
               {selectedVehicle.trip_id !== null && (
                 <div className="route-row">

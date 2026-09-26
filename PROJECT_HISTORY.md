@@ -132,7 +132,7 @@ At startup it:
 5. Checks each vehicle's trip state through the tenant-scoped API.
 6. Publishes only vehicles with an active trip.
 
-Each vehicle follows a repeatable route with a small per-vehicle offset and emits:
+Each vehicle follows a shared Gandhinagar loop (see "Navigation-style live map" below), starting at a different point along it, and emits:
 
 - UTC timestamp
 - Latitude and longitude
@@ -222,6 +222,29 @@ CSV columns: timestamp, latitude, longitude, temperature, humidity, dew_point, e
 
 A dedicated chart library was not added. An SVG path is enough for the required "chart of one sensor value" and keeps the frontend small.
 
+### Navigation-style live map (Gandhinagar) — 2026-09-26
+
+Reviewer feedback: a started trip should look like Google Maps navigation — a path that grows as the vehicle moves and stays visible when the trip stops — and the demo should be located around Gandhinagar, Gujarat.
+
+Simulator changes (`backend/simulator.py`):
+
+- The route is now a closed loop through Gandhinagar: Sachivalaya → Mahatma Mandir → Akshardham → Sector 28 → Indroda Nature Park → Sector 11 → back (about 10.6 km).
+- Waypoints are densified to a fixed `SIMULATOR_STEP_METERS` (default 30 m) so each 2-second tick advances a realistic ~55 km/h instead of jumping between far-apart waypoints.
+- All vehicles share the loop and start evenly spaced along it, so they look like a fleet on one corridor and `sample-route.kml` stays compliant for every vehicle.
+- ~2 m GPS noise and an occasional held position (signal stop) make the motion plausible.
+- Environmental values now sit in Gandhinagar ranges (about 33 °C, 45 % RH, 81 m elevation).
+
+Frontend changes:
+
+- `useFleetSocket` keeps a per-vehicle live trail keyed by trip. Readings append while the trip runs; `Stop trip` marks it ended and keeps it on screen; `Start trip` clears it. Selecting a vehicle mid-trip seeds the trail from `GET .../readings`, so a page refresh does not lose the path.
+- `FleetMap` glides each marker between consecutive readings with `requestAnimationFrame` (1.8 s, matching the publish interval) and rotates a navigation arrow to the bearing of travel. Live trails are drawn as a blue line with a white casing, a green start dot, and a red end dot once the trip stops. The planned route stays green; history trails stay dashed grey.
+- Follow mode pans the map to keep the selected moving vehicle in view (like turn-by-turn navigation) and switches off when the user drags the map. A `Following`/`Follow` control toggles it. The map refits only when the selection or drawn geometry changes, not on every reading — the earlier per-reading `fitBounds` made the view jump every 2 seconds.
+- The vehicle card shows a trip strip with distance travelled (haversine over the trail), duration, current speed (over the last five samples), and sample count. It turns grey with "Trip ended" once the trip stops.
+- `frontend/src/geo.ts` holds the haversine/bearing/summary helpers so the map and card share one implementation.
+- `sample-route.kml` now matches the Gandhinagar loop; `off-route.kml` sits on the Ahmedabad riverfront (~20 km away) to trigger deviation alerts.
+
+Basemap note: CARTO Voyager tiles were tried for a Google-Maps look but now require an API key (tiles rendered "API KEY REQUIRED"), so the map uses standard OpenStreetMap tiles. Swapping to a keyed provider is a one-line `TileLayer` change.
+
 ### Verification completed
 
 The following were exercised successfully:
@@ -266,6 +289,10 @@ The following were exercised successfully:
 - CSV export returning a header plus one row per reading.
 - Org B receiving `403` when requesting Org A's CSV.
 - Browser history panel listing Truck A1 trips, temperature chart, Download CSV, and GPS trail overlay.
+- Simulator publishing Gandhinagar coordinates (23.2°N, 72.6°E) for three vehicles with the densified loop (354 points).
+- Browser: Truck A1 gliding along GH Road / Sector 11 with a rotated heading arrow, a growing blue trail from a green start dot, and a live strip reading 955 m · 1m 39s · 37 km/h.
+- Browser: Stop trip turned the trail and arrow grey, added a red end marker, kept the path visible, showed "Trip ended · 1.1 km · 1m 54s", and the vehicle dropped to Offline after the 20 s grace period while the other two kept moving.
+- Frontend TypeScript check passing after the map rework.
 
 Local test accounts created during verification:
 
@@ -317,12 +344,13 @@ These are local development credentials only. Production credentials and `JWT_SE
 - `vite.config.ts`: Vite React plugin configuration.
 - `index.html`: application document metadata and React entry point.
 - `src/main.tsx`: mounts the React application.
-- `src/App.tsx`: login/session flow, dashboard composition, organization filter, status summaries, vehicle details, trip controls, and KML upload.
+- `src/App.tsx`: login/session flow, dashboard composition, organization filter, status summaries, vehicle details, trip controls, live trip strip, and KML upload.
 - `src/api.ts`: typed HTTP client, multipart route upload, and API/WebSocket environment URLs.
-- `src/types.ts`: shared frontend contracts for Users, Trips, routes, alerts, and live Vehicles.
-- `src/useFleetSocket.ts`: snapshot handling, reading merges, live alerts, and bounded exponential reconnect.
+- `src/types.ts`: shared frontend contracts for Users, Trips, routes, alerts, live Vehicles, and live trails.
+- `src/geo.ts`: haversine distance, bearing, trail summary (distance/duration/speed), and formatting helpers.
+- `src/useFleetSocket.ts`: snapshot handling, reading merges, per-trip live trails, live alerts, and bounded exponential reconnect.
 - `src/TripHistory.tsx`: past-trip list, temperature chart, CSV download, and trail/planned-route selection.
-- `src/FleetMap.tsx`: Leaflet map, planned-route polyline, actual GPS trail, viewport fitting, status markers, and popups.
+- `src/FleetMap.tsx`: Leaflet map, smooth marker animation with heading arrows, live and history trails, planned-route polyline, follow mode, and selection-based viewport fitting.
 - `src/style.css`: application visual system and responsive layouts.
 - `public/sample-route.kml` and `public/off-route.kml`: example planned routes for demos and tests.
 

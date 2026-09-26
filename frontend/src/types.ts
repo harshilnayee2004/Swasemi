@@ -75,5 +75,17 @@ export interface LiveVehicle {
   longitude: number | null
 }
 
+export interface TrailPoint {
+  lat: number
+  lng: number
+  t: number
+}
+
+export interface VehicleTrail {
+  tripId: number
+  points: TrailPoint[]
+  ended: boolean
+}
+
 export type ConnectionState = 'connecting' | 'connected' | 'disconnected'
 

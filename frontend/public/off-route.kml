@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2">
   <Document>
-    <name>Off-corridor test route</name>
+    <name>Off-corridor test route (Ahmedabad riverfront)</name>
     <Placemark>
       <LineString>
         <coordinates>
-          77.65000,13.05000,0
-          77.65500,13.05500,0
-          77.66000,13.06000,0
+          72.5700,23.0300,0
+          72.5750,23.0400,0
+          72.5800,23.0500,0
         </coordinates>
       </LineString>
     </Placemark>
