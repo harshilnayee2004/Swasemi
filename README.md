@@ -2,7 +2,7 @@
 
 Multi-tenant fleet dashboard: FastAPI, Postgres, Redis, MQTT, React.
 
-Design notes and verification are in [PROJECT_HISTORY.md](PROJECT_HISTORY.md).
+Design notes, verification, and the interview manual (how to run, folders, distance, Follow, UI blocks) are in [PROJECT_HISTORY.md](PROJECT_HISTORY.md#9-interview-manual).
 
 ## Local run
 
