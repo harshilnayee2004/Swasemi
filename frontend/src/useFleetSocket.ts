@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import { WS_URL } from './api'
-import type { ConnectionState, FleetAlert, LiveVehicle } from './types'
+import type { ConnectionState, FleetAlert, LiveVehicle, TrailPoint, VehicleTrail } from './types'
 
 interface SnapshotMessage {
   type: 'snapshot'
@@ -17,15 +17,37 @@ interface AlertMessage extends FleetAlert {
   alert_type?: string
 }
 
+const MAX_TRAIL_POINTS = 4000
+
+type TrailMap = Record<number, VehicleTrail>
+
+function appendPoint(
+  trails: TrailMap,
+  vehicleId: number,
+  tripId: number,
+  point: TrailPoint,
+): TrailMap {
+  const existing = trails[vehicleId]
+  if (!existing || existing.tripId !== tripId) {
+    return { ...trails, [vehicleId]: { tripId, points: [point], ended: false } }
+  }
+  const last = existing.points[existing.points.length - 1]
+  if (last && last.t >= point.t) return trails
+  const points = [...existing.points, point].slice(-MAX_TRAIL_POINTS)
+  return { ...trails, [vehicleId]: { tripId, points, ended: false } }
+}
+
 export function useFleetSocket(token: string | null) {
   const [vehicles, setVehicles] = useState<LiveVehicle[]>([])
   const [alerts, setAlerts] = useState<FleetAlert[]>([])
+  const [trails, setTrails] = useState<TrailMap>({})
   const [connection, setConnection] = useState<ConnectionState>('connecting')
 
   useEffect(() => {
     if (!token) {
       setVehicles([])
       setAlerts([])
+      setTrails({})
       setConnection('disconnected')
       return
     }
@@ -47,7 +69,13 @@ export function useFleetSocket(token: string | null) {
       socket.onmessage = (event) => {
         const message = JSON.parse(event.data) as SnapshotMessage | ReadingMessage | AlertMessage
         if (message.type === 'snapshot') {
-          setVehicles(message.vehicles)
+          setVehicles((current) => {
+            const previous = new Map(current.map((vehicle) => [vehicle.vehicle_id, vehicle]))
+            return message.vehicles.map((vehicle) => ({
+              ...previous.get(vehicle.vehicle_id),
+              ...vehicle,
+            }))
+          })
           return
         }
         if (message.type === 'reading') {
@@ -58,6 +86,14 @@ export function useFleetSocket(token: string | null) {
                 : vehicle,
             ),
           )
+          if (message.trip_id !== null && message.latitude !== null && message.longitude !== null) {
+            const point: TrailPoint = {
+              lat: message.latitude,
+              lng: message.longitude,
+              t: message.last_seen ? Date.parse(message.last_seen) : Date.now(),
+            }
+            setTrails((current) => appendPoint(current, message.vehicle_id, message.trip_id as number, point))
+          }
           return
         }
         if (message.type === 'alert') {
@@ -106,7 +142,48 @@ export function useFleetSocket(token: string | null) {
           : vehicle,
       ),
     )
+    setTrails((current) => {
+      if (tripId === null) {
+        const existing = current[vehicleId]
+        return existing ? { ...current, [vehicleId]: { ...existing, ended: true } } : current
+      }
+      return { ...current, [vehicleId]: { tripId, points: [], ended: false } }
+    })
   }, [])
 
-  return { vehicles, alerts, connection, updateTrip, setAlerts }
+  const seedTrail = useCallback((vehicleId: number, tripId: number, points: TrailPoint[]) => {
+    setTrails((current) => {
+      const existing = current[vehicleId]
+      const lastSeeded = points[points.length - 1]?.t ?? 0
+      const live =
+        existing && existing.tripId === tripId
+          ? existing.points.filter((point) => point.t > lastSeeded)
+          : []
+      return {
+        ...current,
+        [vehicleId]: { tripId, points: [...points, ...live].slice(-MAX_TRAIL_POINTS), ended: false },
+      }
+    })
+  }, [])
+
+  const addVehicle = useCallback((vehicle: LiveVehicle) => {
+    setVehicles((current) =>
+      current.some((item) => item.vehicle_id === vehicle.vehicle_id)
+        ? current
+        : [...current, vehicle],
+    )
+  }, [])
+
+  const removeVehicle = useCallback((vehicleId: number) => {
+    setVehicles((current) => current.filter((vehicle) => vehicle.vehicle_id !== vehicleId))
+    setTrails((current) => {
+      if (!(vehicleId in current)) return current
+      const next = { ...current }
+      delete next[vehicleId]
+      return next
+    })
+    setAlerts((current) => current.filter((alert) => alert.vehicle_id !== vehicleId))
+  }, [])
+
+  return { vehicles, alerts, trails, connection, updateTrip, seedTrail, setAlerts, addVehicle, removeVehicle }
 }

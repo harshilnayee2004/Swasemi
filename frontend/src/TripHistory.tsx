@@ -118,7 +118,7 @@ export function TripHistory({
           <p className="eyebrow dark">Trip history</p>
           <h3>{vehicleName}</h3>
         </div>
-        <button className="text-button" onClick={onClose}>Close</button>
+        <button type="button" className="text-button" onClick={onClose}>Close</button>
       </div>
 
       {error && <div className="form-error compact">{error}</div>}
