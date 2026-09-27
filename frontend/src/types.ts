@@ -30,6 +30,24 @@ export interface CurrentUser {
   org_id: number | null
 }
 
+export interface UserWithOrg {
+  id: number
+  email: string
+  role: Role
+  org_id: number | null
+  org_name: string | null
+  password_hint?: string | null
+  created_at?: string | null
+}
+
+export interface PlatformStats {
+  total_users: number
+  total_organizations: number
+  total_vehicles: number
+  total_active_trips: number
+  total_readings: number
+}
+
 export interface TokenResponse {
   access_token: string
   token_type: string

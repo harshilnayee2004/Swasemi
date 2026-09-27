@@ -1,22 +1,49 @@
 # Swasemi Fleet Telemetry
 
-Multi-tenant fleet dashboard: FastAPI, Postgres, Redis, MQTT, React.
+Multi-tenant fleet telemetry platform built with FastAPI, PostgreSQL, Redis, MQTT, and React + TypeScript + Vite.
 
-Design notes, verification, and the interview manual (how to run, folders, distance, Follow, UI blocks) are in [PROJECT_HISTORY.md](PROJECT_HISTORY.md#9-interview-manual).
+Design notes, architectural verification, and interview questions are in [PROJECT_HISTORY.md](PROJECT_HISTORY.md).
 
-## Local run
+---
 
-1. `docker compose up -d` (Postgres on 5433, Redis on 6379)
-2. Backend: copy `backend/.env.example` to `backend/.env`, create a venv, `pip install -r backend/requirements.txt`, run `python create_tables.py`, then `python -m uvicorn main:app --host 127.0.0.1 --port 8000`
-3. Frontend: `cd frontend && npm install && npm run dev`
-4. Simulator (optional): `python simulator.py` from `backend/` while at least one trip is active
+## 🚀 One-Command Deployment (Production / Cloud / Staging)
 
-## Demo logins (local seed)
+To deploy the entire platform (Database, Cache, Backend API, Automated Simulator, and Frontend):
 
-| Role | Email | Password |
-| --- | --- | --- |
-| Super Admin | `admin@example.com` | `adminpass` |
-| Org A user | `usera@example.com` | `usera-pass` |
-| Org B user | `userb@example.com` | `userb-pass` |
+```bash
+docker compose up --build -d
+```
 
-There is no public signup. `admin@astermedcare.com` is not a seeded account.
+This single command automatically starts:
+- **PostgreSQL 16** (Port `5433:5432`)
+- **Redis 7** (Port `6379:6379`)
+- **FastAPI Backend** (Port `8000`) - auto-creates and seeds database tables
+- **Telemetry Simulator** (Background Worker) - automatically generates live vehicle telemetry
+- **React Frontend (Nginx)** (Port `80` & `5173`)
+
+### Access URLs:
+- **Dashboard**: http://localhost/ (or http://localhost:5173/)
+- **API Docs**: http://localhost:8000/docs
+- **Health Check**: http://localhost:8000/health
+
+---
+
+## 💻 Local Development Launcher
+
+If developing locally on Windows:
+
+```powershell
+.\start-all.ps1
+```
+
+---
+
+## 🔑 Demo Logins (Auto-Seeded)
+
+| Role | Email | Password | Scope |
+| --- | --- | --- | --- |
+| **Super Admin** | `admin@example.com` | `adminpass` | Views all organizations & fleets |
+| **Org A User** | `usera@example.com` | `usera-pass` | Logistics Alpha fleet |
+| **Org B User** | `userb@example.com` | `userb-pass` | Transporter Beta fleet |
+
+*Note: Onboarding is invite-only by design.*

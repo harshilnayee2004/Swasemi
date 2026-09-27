@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { CircleMarker, MapContainer, Marker, Polyline, Popup, TileLayer, useMap, useMapEvents } from 'react-leaflet'
+import { CircleMarker, MapContainer, Marker, Polyline, Popup, TileLayer, useMap } from 'react-leaflet'
 import { divIcon } from 'leaflet'
 import type { LatLngBoundsExpression, LatLngExpression } from 'leaflet'
 
@@ -161,34 +161,12 @@ function ZoomControls() {
   )
 }
 
-/** Keep the selected moving vehicle in view, like turn-by-turn navigation. */
-function FollowVehicle({
-  target,
-  enabled,
-  onUserPan,
-}: {
-  target: LatLng | null
-  enabled: boolean
-  onUserPan: () => void
-}) {
-  const map = useMap()
-  useMapEvents({ dragstart: onUserPan })
-  useEffect(() => {
-    if (!enabled || !target) return
-    if (!map.getBounds().pad(-0.3).contains(target)) {
-      map.panTo(target, { animate: true, duration: 0.9 })
-    }
-  }, [enabled, map, target])
-  return null
-}
-
 interface FleetMapProps {
   vehicles: LiveVehicle[]
   selectedVehicleId: number | null
   route: RoutePoint[]
   historyTrail: Reading[]
   liveTrail: VehicleTrail | null
-  followToken: string
   onSelect: (vehicleId: number) => void
   isOnline: (vehicle: LiveVehicle) => boolean
 }
@@ -199,16 +177,10 @@ export function FleetMap({
   route,
   historyTrail,
   liveTrail,
-  followToken,
   onSelect,
   isOnline,
 }: FleetMapProps) {
-  const [follow, setFollow] = useState(true)
   const poses = useSmoothPoses(vehicles)
-
-  useEffect(() => {
-    setFollow(true)
-  }, [followToken])
 
   const positioned = vehicles.filter(
     (vehicle): vehicle is LiveVehicle & { latitude: number; longitude: number } =>
@@ -232,10 +204,6 @@ export function FleetMap({
     : positioned.map((vehicle) => [vehicle.latitude, vehicle.longitude] as LatLng)
   const fitKey = `${selectedVehicleId ?? 'all'}|${route.length}|${historyTrail.length}|${positioned.length > 0}`
 
-  const followTarget: LatLng | null =
-    selected && liveTrail && !liveTrail.ended && selected.trip_id !== null
-      ? poses[selected.vehicle_id]?.position ?? [selected.latitude, selected.longitude]
-      : null
   const motion = trailMotion(livePoints, liveTrail?.ended ?? false)
   const hudLabel =
     motion === 'moving'
@@ -255,7 +223,6 @@ export function FleetMap({
           maxZoom={19}
         />
         <FitOnChange points={fitPoints} fitKey={fitKey} />
-        <FollowVehicle target={followTarget} enabled={follow} onUserPan={() => setFollow(false)} />
         <ZoomControls />
 
         {routePath.length >= 2 && (
@@ -332,24 +299,13 @@ export function FleetMap({
         <strong>{hudLabel}</strong>
         <small>
           {motion === 'moving'
-            ? 'Following the live GPS trail'
+            ? 'Live GPS trail active'
             : motion === 'stopped'
               ? 'Holding position — like a signal stop'
               : motion === 'ended'
                 ? 'Start and end pins stay on the path'
                 : 'Start a trip to draw the route'}
         </small>
-      </div>
-
-      <div className="map-controls">
-        <button
-          className={`map-control ${follow ? 'active' : ''}`}
-          onClick={() => setFollow((value) => !value)}
-          title="Keep the selected vehicle in view"
-        >
-          <span className="control-icon">◎</span>
-          {follow ? 'Following' : 'Follow'}
-        </button>
       </div>
     </div>
   )

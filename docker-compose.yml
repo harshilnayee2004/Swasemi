@@ -19,5 +19,47 @@ services:
     ports:
       - "6379:6379"
 
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: always
+    environment:
+      - DATABASE_URL=postgresql+psycopg2://swasemi:swasemi_dev@postgres:5432/fleet
+      - REDIS_URL=redis://redis:6379/0
+      - MQTT_HOST=broker.emqx.io
+      - FRONTEND_ORIGINS=http://localhost,http://localhost:5173,http://127.0.0.1,http://localhost:80
+    ports:
+      - "8000:8000"
+    depends_on:
+      - postgres
+      - redis
+
+  simulator:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: always
+    command: python simulator.py
+    environment:
+      - SIMULATOR_API_URL=http://backend:8000
+      - SIMULATOR_EMAIL=admin@example.com
+      - SIMULATOR_PASSWORD=adminpass
+      - MQTT_HOST=broker.emqx.io
+      - SIMULATOR_INTERVAL_SECONDS=2
+    depends_on:
+      - backend
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: always
+    ports:
+      - "80:80"
+      - "5173:80"
+    depends_on:
+      - backend
+
 volumes:
   pgdata:

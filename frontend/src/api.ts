@@ -5,10 +5,12 @@ import type {
   InvitePublic,
   Organization,
   PlannedRouteOut,
+  PlatformStats,
   Reading,
   RouteOut,
   TokenResponse,
   Trip,
+  UserWithOrg,
   VehicleRecord,
 } from './types'
 
@@ -62,6 +64,10 @@ export function joinWithInvite(token: string, password: string, email?: string) 
   })
 }
 
+export function getPlatformStats(token: string) {
+  return request<PlatformStats>('/admin/stats', {}, token)
+}
+
 export function listOrganizations(token: string) {
   return request<Organization[]>('/admin/organizations', {}, token)
 }
@@ -71,6 +77,22 @@ export function createOrganization(name: string, token: string) {
     method: 'POST',
     body: JSON.stringify({ name }),
   }, token)
+}
+
+export async function deleteOrganization(orgId: number, token: string) {
+  const response = await fetch(`${API_URL}/admin/organizations/${orgId}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null)
+    const detail = typeof payload?.detail === 'string' ? payload.detail : 'Could not delete organization'
+    throw new Error(detail)
+  }
+}
+
+export function listAllUsers(token: string) {
+  return request<UserWithOrg[]>('/admin/users', {}, token)
 }
 
 export function listOrganizationUsers(orgId: number, token: string) {
@@ -88,6 +110,18 @@ export function listInvites(token: string) {
   return request<Invite[]>('/admin/invites', {}, token)
 }
 
+export async function deleteInvite(inviteId: number, token: string) {
+  const response = await fetch(`${API_URL}/admin/invites/${inviteId}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null)
+    const detail = typeof payload?.detail === 'string' ? payload.detail : 'Could not delete invite'
+    throw new Error(detail)
+  }
+}
+
 export function createUser(
   email: string,
   password: string,
@@ -97,6 +131,17 @@ export function createUser(
   return request<CurrentUser>('/admin/users', {
     method: 'POST',
     body: JSON.stringify({ email, password, role: 'user', org_id: orgId }),
+  }, token)
+}
+
+export function resetUserPassword(
+  userId: number,
+  newPassword: string,
+  token: string,
+) {
+  return request<{ status: string; message: string }>(`/admin/users/${userId}/reset-password`, {
+    method: 'POST',
+    body: JSON.stringify({ new_password: newPassword }),
   }, token)
 }
 

@@ -56,6 +56,30 @@ class UserOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class UserWithOrgOut(BaseModel):
+    id: int
+    email: EmailStr
+    role: str
+    org_id: Optional[int] = None
+    org_name: Optional[str] = None
+    password_hint: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class ResetPasswordRequest(BaseModel):
+    new_password: str
+
+
+class PlatformStatsOut(BaseModel):
+    total_users: int
+    total_organizations: int
+    total_vehicles: int
+    total_active_trips: int
+    total_readings: int
+
+
 class InviteCreate(BaseModel):
     org_id: int
     email: Optional[EmailStr] = None

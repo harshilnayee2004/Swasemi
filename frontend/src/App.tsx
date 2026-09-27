@@ -557,7 +557,6 @@ function Dashboard({ token, user, onLogout }: DashboardProps) {
             route={historyOpen ? historyRoute : route}
             historyTrail={trail}
             liveTrail={historyOpen ? null : liveTrail}
-            followToken={`${selectedVehicle?.vehicle_id ?? 'none'}-${selectedVehicle?.trip_id ?? 'stopped'}`}
             onSelect={setSelectedVehicleId}
             isOnline={isOnline}
           />

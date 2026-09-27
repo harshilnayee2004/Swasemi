@@ -19,6 +19,11 @@ logging.basicConfig(level=logging.INFO)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    try:
+        from create_tables import init_db
+        init_db()
+    except Exception as e:
+        logging.error(f"Failed to initialize database: {e}")
     start_mqtt()
     fanout_task = asyncio.create_task(redis_fanout_loop())
     try:
