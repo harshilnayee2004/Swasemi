@@ -1,0 +1,9 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "http://swasemi-fleet-env.eba-hc9ktitq.us-east-1.elasticbeanstalk.com/:path*"
+    }
+  ]
+}

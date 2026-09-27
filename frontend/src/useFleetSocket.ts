@@ -52,6 +52,12 @@ export function useFleetSocket(token: string | null) {
       return
     }
 
+    const socketUrl = WS_URL
+    if (!socketUrl) {
+      setConnection('disconnected')
+      return
+    }
+
     let socket: WebSocket | null = null
     let reconnectTimer: number | null = null
     let stopped = false
@@ -59,7 +65,7 @@ export function useFleetSocket(token: string | null) {
 
     const connect = () => {
       setConnection('connecting')
-      socket = new WebSocket(`${WS_URL}?token=${encodeURIComponent(token)}`)
+      socket = new WebSocket(`${socketUrl}?token=${encodeURIComponent(token)}`)
 
       socket.onopen = () => {
         retry = 0

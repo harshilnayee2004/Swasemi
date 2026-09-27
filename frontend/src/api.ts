@@ -17,8 +17,10 @@ import type {
 const configuredApiUrl = import.meta.env.VITE_API_URL?.trim()
 const configuredWsUrl = import.meta.env.VITE_WS_URL?.trim()
 
-export const API_URL = (configuredApiUrl || 'http://127.0.0.1:8000').replace(/\/$/, '')
-export const WS_URL = configuredWsUrl || `${API_URL.replace(/^http/, 'ws')}/ws`
+const defaultApiUrl = import.meta.env.DEV ? 'http://127.0.0.1:8000' : '/api'
+
+export const API_URL = (configuredApiUrl || defaultApiUrl).replace(/\/$/, '')
+export const WS_URL = configuredWsUrl || (import.meta.env.DEV ? `${API_URL.replace(/^http/, 'ws')}/ws` : null)
 
 async function request<T>(
   path: string,
