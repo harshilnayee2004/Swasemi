@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from auth import get_current_org_user, get_current_user
 from database import get_db
 from geo import parse_route_file
+from compliance import notify_manual_deviation
 from models import Alert, Reading, RoutePoint, Trip, User, Vehicle, VehicleRoutePoint
 from schemas import AlertOut, ReadingOut, RouteOut, RoutePointOut, TripOut
 
@@ -145,7 +146,13 @@ def _set_force_deviate(
     trip.force_deviate = enabled
     db.commit()
     db.refresh(trip)
-    return trip
+    email_sent = False
+    email_to: list[str] = []
+    if enabled:
+        email_sent, email_to = notify_manual_deviation(db, trip, vehicle, user)
+    return TripOut.model_validate(trip).model_copy(
+        update={"email_sent": email_sent if enabled else None, "email_to": email_to}
+    )
 
 
 @router.post("/vehicles/{vehicle_id}/trips/{trip_id}/deviate", response_model=TripOut)

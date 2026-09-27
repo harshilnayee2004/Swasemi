@@ -29,8 +29,24 @@ def deliverable_recipients(addresses: list[str]) -> list[str]:
     return [address for address in addresses if address and _deliverable(address)]
 
 
-def send_email(to_addresses: list[str], subject: str, body: str) -> bool:
+def fallback_inbox() -> str | None:
+    extra = os.getenv("ALERT_TO_EMAIL", "").strip()
+    for address in (extra, SMTP_FROM, SMTP_USERNAME):
+        if address and _deliverable(address):
+            return address
+    return None
+
+
+def resolve_alert_recipients(to_addresses: list[str]) -> list[str]:
     recipients = deliverable_recipients(to_addresses)
+    if recipients:
+        return recipients
+    inbox = fallback_inbox()
+    return [inbox] if inbox else []
+
+
+def send_email(to_addresses: list[str], subject: str, body: str) -> bool:
+    recipients = resolve_alert_recipients(to_addresses)
     if not recipients:
         logger.warning("No recipients for alert email")
         return False

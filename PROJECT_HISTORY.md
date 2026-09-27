@@ -2,6 +2,12 @@
 
 This document is the running engineering record for the assignment. Update it whenever the project changes. It explains what exists, why each decision was made, how data moves through the system, and what remains.
 
+## 1.3 Deviation email on Deviate click (2026-09-27)
+
+- Clicking **Deviate** now creates a route-deviation alert and sends mail immediately. The GPS offset still runs on the next simulator ticks.
+- Demo `@example.com` org users no longer silently drop mail: `ALERT_TO_EMAIL`, then `ALERT_FROM_EMAIL` / SMTP username, is used as the inbox.
+- The dashboard reports who was emailed, or tells you SMTP is missing on the host.
+
 ## 1.2 UI/UX polish completed on 2026-09-27
 
 - Unified dashboard surfaces, action colors, spacing, borders, hover states, and overflow handling across the fleet sidebar, live map card, trip history, and Admin Console.

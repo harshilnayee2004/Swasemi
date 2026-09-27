@@ -471,7 +471,16 @@ function Dashboard({ token, user, onLogout }: DashboardProps) {
         !forceDeviate,
       )
       setForceDeviate(trip.force_deviate)
-      setSuccessMessage(trip.force_deviate ? 'Deviation mode enabled' : 'Back on planned route')
+      if (!trip.force_deviate) {
+        setSuccessMessage('Back on planned route')
+      } else if (trip.email_sent) {
+        const inbox = trip.email_to?.length ? trip.email_to.join(', ') : 'your inbox'
+        setSuccessMessage(`Deviation started. Alert email sent to ${inbox}`)
+      } else {
+        setActionError(
+          'Deviation is on, but no email was sent. On Render set SMTP_HOST, SMTP_USERNAME, SMTP_PASSWORD, and ALERT_TO_EMAIL to a real Gmail address.',
+        )
+      }
     } catch (reason) {
       setActionError(reason instanceof Error ? reason.message : 'Could not change deviation')
     } finally {

@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
-from emailer import deliverable_recipients, send_email
+from emailer import resolve_alert_recipients, send_email
 from geo import distance_to_route_m
 from models import Alert, Organization, RoutePoint, Trip, User, Vehicle
 from realtime import alert_payload, publish_telemetry
@@ -80,9 +80,9 @@ def evaluate_route_compliance(
         f"Trip ID: {trip.id}\n"
         f"Position: {latitude:.6f}, {longitude:.6f}\n"
     )
-    if recipients and not deliverable_recipients(recipients):
+    if recipients and not resolve_alert_recipients(recipients):
         logger.warning(
-            "Alert created but no email sent - all org users have a non-deliverable demo email domain"
+            "Alert created but no email sent - no deliverable org inbox and no SMTP fallback"
         )
     try:
         if send_email(recipients, f"Route deviation: {vehicle.name}", body):
@@ -94,3 +94,57 @@ def evaluate_route_compliance(
 
     publish_telemetry(alert_payload(alert, vehicle, org_name))
     return alert
+
+
+def notify_manual_deviation(
+    db: Session,
+    trip: Trip,
+    vehicle: Vehicle,
+    actor: User | None = None,
+) -> tuple[bool, list[str]]:
+    org = db.query(Organization).filter(Organization.id == vehicle.org_id).first()
+    org_name = org.name if org else f"organization {vehicle.org_id}"
+    message = f"{vehicle.name} was marked off-route by the operator."
+    alert = Alert(
+        trip_id=trip.id,
+        vehicle_id=vehicle.id,
+        org_id=vehicle.org_id,
+        type="route_deviation",
+        message=message,
+        latitude=None,
+        longitude=None,
+    )
+    db.add(alert)
+    db.commit()
+    db.refresh(alert)
+
+    recipients = [
+        user.email
+        for user in db.query(User).filter(User.org_id == vehicle.org_id).all()
+    ]
+    if actor is not None and actor.email:
+        recipients.append(actor.email)
+    extra = os.getenv("ALERT_TO_EMAIL", "").strip()
+    if extra:
+        recipients.append(extra)
+
+    body = (
+        f"{message}\n\n"
+        f"Organization: {org_name}\n"
+        f"Vehicle: {vehicle.name} ({vehicle.device_id})\n"
+        f"Trip ID: {trip.id}\n"
+        f"This alert was sent because Deviate was clicked on the dashboard.\n"
+    )
+    emailed = False
+    sent_to = resolve_alert_recipients(recipients)
+    try:
+        emailed = send_email(recipients, f"Route deviation: {vehicle.name}", body)
+        if emailed:
+            alert.emailed_at = datetime.now(timezone.utc)
+            db.commit()
+            db.refresh(alert)
+    except Exception:
+        logger.exception("Failed to send manual deviation email for trip %s", trip.id)
+
+    publish_telemetry(alert_payload(alert, vehicle, org_name))
+    return emailed, sent_to

@@ -67,6 +67,8 @@ export interface Trip {
   force_deviate: boolean
   started_at: string
   ended_at: string | null
+  email_sent?: boolean | null
+  email_to?: string[]
 }
 
 export interface RoutePoint {
