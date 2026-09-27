@@ -17,12 +17,28 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 REDIS_CHANNEL = os.getenv("REDIS_CHANNEL", "fleet:telemetry")
 
 _sync_redis: Redis | None = None
+_loop: asyncio.AbstractEventLoop | None = None
+_redis_ok = False
+
+
+def attach_loop(loop: asyncio.AbstractEventLoop) -> None:
+    global _loop
+    _loop = loop
+
+
+def redis_reachable() -> bool:
+    return _redis_ok
 
 
 def get_sync_redis() -> Redis:
     global _sync_redis
     if _sync_redis is None:
-        _sync_redis = Redis.from_url(REDIS_URL, decode_responses=True)
+        _sync_redis = Redis.from_url(
+            REDIS_URL,
+            decode_responses=True,
+            socket_connect_timeout=2,
+            socket_timeout=2,
+        )
     return _sync_redis
 
 
@@ -30,7 +46,10 @@ def publish_telemetry(payload: dict) -> None:
     try:
         get_sync_redis().publish(REDIS_CHANNEL, json.dumps(payload, default=str))
     except Exception:
-        logger.exception("Redis publish failed")
+        logger.debug("Redis publish skipped; using in-process WebSocket fan-out")
+    loop = _loop
+    if loop is not None and loop.is_running():
+        asyncio.run_coroutine_threadsafe(manager.broadcast(payload), loop)
 
 
 def _iso(value: datetime | None) -> str | None:
@@ -182,6 +201,7 @@ manager = ConnectionManager()
 
 
 async def redis_fanout_loop() -> None:
+    global _redis_ok
     while True:
         client = None
         pubsub = None
@@ -189,6 +209,7 @@ async def redis_fanout_loop() -> None:
             client = redis_async.from_url(REDIS_URL, decode_responses=True)
             pubsub = client.pubsub()
             await pubsub.subscribe(REDIS_CHANNEL)
+            _redis_ok = True
             logger.info("Redis subscribed to %s", REDIS_CHANNEL)
             async for message in pubsub.listen():
                 if message.get("type") != "message":
@@ -205,8 +226,12 @@ async def redis_fanout_loop() -> None:
         except asyncio.CancelledError:
             raise
         except Exception:
-            logger.exception("Redis fan-out disconnected; retrying")
-            await asyncio.sleep(1)
+            _redis_ok = False
+            logger.warning(
+                "Redis is not reachable at %s; live map uses in-process fan-out",
+                REDIS_URL,
+            )
+            await asyncio.sleep(30)
         finally:
             if pubsub is not None:
                 try:

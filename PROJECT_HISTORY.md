@@ -2,6 +2,11 @@
 
 This document is the running engineering record for the assignment. Update it whenever the project changes. It explains what exists, why each decision was made, how data moves through the system, and what remains.
 
+## 1.4 Render without Redis (2026-09-27)
+
+- Live telemetry now fans out in-process to WebSocket clients. Redis is optional. If `REDIS_URL` points at localhost on Render, the API stays up and the map still streams.
+- `/health` only fails when PostgreSQL is down. Missing Redis is reported as `local`.
+
 ## 1.3 Deviation email on Deviate click (2026-09-27)
 
 - Clicking **Deviate** now creates a route-deviation alert and sends mail immediately. The GPS offset still runs on the next simulator ticks.

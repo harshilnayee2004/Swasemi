@@ -10,7 +10,7 @@ from sqlalchemy import text
 from auth import router as auth_router
 from database import engine
 from mqtt_ingest import start_mqtt, stop_mqtt
-from realtime import get_sync_redis, redis_fanout_loop
+from realtime import attach_loop, redis_fanout_loop, redis_reachable
 from routers.admin import router as admin_router
 from routers.trips import router as trips_router
 from routers.vehicles import router as vehicles_router
@@ -25,6 +25,7 @@ async def lifespan(app: FastAPI):
     from create_tables import init_db
 
     init_db()
+    attach_loop(asyncio.get_running_loop())
     start_mqtt()
     fanout_task = asyncio.create_task(redis_fanout_loop())
     try:
@@ -66,19 +67,17 @@ app.include_router(ws_router)
 
 @app.get("/health")
 def health():
-    dependencies = {"database": "ok", "redis": "ok"}
+    dependencies = {
+        "database": "ok",
+        "redis": "ok" if redis_reachable() else "local",
+    }
     try:
         with engine.connect() as connection:
             connection.execute(text("SELECT 1"))
     except Exception:
         logging.exception("Health check database dependency failed")
         dependencies["database"] = "error"
-    try:
-        get_sync_redis().ping()
-    except Exception:
-        logging.exception("Health check Redis dependency failed")
-        dependencies["redis"] = "error"
-    if "error" in dependencies.values():
+    if dependencies["database"] == "error":
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={"status": "error", **dependencies},
