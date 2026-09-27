@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
-from emailer import resolve_alert_recipients, send_email
+from emailer import resolve_alert_recipients, send_alert_email
 from geo import distance_to_route_m
 from models import Alert, Organization, RoutePoint, Trip, User, Vehicle
 from realtime import alert_payload, publish_telemetry
@@ -85,7 +85,8 @@ def evaluate_route_compliance(
             "Alert created but no email sent - no deliverable org inbox and no SMTP fallback"
         )
     try:
-        if send_email(recipients, f"Route deviation: {vehicle.name}", body):
+        emailed, _, _ = send_alert_email(recipients, f"Route deviation: {vehicle.name}", body)
+        if emailed:
             alert.emailed_at = datetime.now(timezone.utc)
             db.commit()
             db.refresh(alert)
@@ -101,7 +102,7 @@ def notify_manual_deviation(
     trip: Trip,
     vehicle: Vehicle,
     actor: User | None = None,
-) -> tuple[bool, list[str]]:
+) -> tuple[bool, list[str], str]:
     org = db.query(Organization).filter(Organization.id == vehicle.org_id).first()
     org_name = org.name if org else f"organization {vehicle.org_id}"
     message = f"{vehicle.name} was marked off-route by the operator."
@@ -137,14 +138,18 @@ def notify_manual_deviation(
     )
     emailed = False
     sent_to = resolve_alert_recipients(recipients)
+    error = ""
     try:
-        emailed = send_email(recipients, f"Route deviation: {vehicle.name}", body)
+        emailed, sent_to, error = send_alert_email(
+            recipients, f"Route deviation: {vehicle.name}", body
+        )
         if emailed:
             alert.emailed_at = datetime.now(timezone.utc)
             db.commit()
             db.refresh(alert)
-    except Exception:
+    except Exception as exc:
+        error = str(exc)
         logger.exception("Failed to send manual deviation email for trip %s", trip.id)
 
     publish_telemetry(alert_payload(alert, vehicle, org_name))
-    return emailed, sent_to
+    return emailed, sent_to, error

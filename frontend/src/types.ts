@@ -69,6 +69,7 @@ export interface Trip {
   ended_at: string | null
   email_sent?: boolean | null
   email_to?: string[]
+  email_error?: string | null
 }
 
 export interface RoutePoint {

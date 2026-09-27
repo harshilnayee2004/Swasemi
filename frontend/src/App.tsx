@@ -478,7 +478,8 @@ function Dashboard({ token, user, onLogout }: DashboardProps) {
         setSuccessMessage(`Deviation started. Alert email sent to ${inbox}`)
       } else {
         setActionError(
-          'Deviation is on, but no email was sent. On Render set SMTP_HOST, SMTP_USERNAME, SMTP_PASSWORD, and ALERT_TO_EMAIL to a real Gmail address.',
+          trip.email_error
+            || 'Deviation is on, but email was not sent. Render blocks Gmail SMTP — add RESEND_API_KEY.',
         )
       }
     } catch (reason) {

@@ -2,6 +2,11 @@
 
 This document is the running engineering record for the assignment. Update it whenever the project changes. It explains what exists, why each decision was made, how data moves through the system, and what remains.
 
+## 1.5 Render blocks Gmail SMTP (2026-09-27)
+
+- Free Render web services drop outbound ports 25/465/587, so `smtp.gmail.com` never leaves the box. Local SMTP still works.
+- Deviation mail now prefers Resend over HTTPS (`RESEND_API_KEY`). The dashboard shows the provider error if send fails.
+
 ## 1.4 Render without Redis (2026-09-27)
 
 - Live telemetry now fans out in-process to WebSocket clients. Redis is optional. If `REDIS_URL` points at localhost on Render, the API stays up and the map still streams.

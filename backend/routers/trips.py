@@ -148,10 +148,15 @@ def _set_force_deviate(
     db.refresh(trip)
     email_sent = False
     email_to: list[str] = []
+    email_error = ""
     if enabled:
-        email_sent, email_to = notify_manual_deviation(db, trip, vehicle, user)
+        email_sent, email_to, email_error = notify_manual_deviation(db, trip, vehicle, user)
     return TripOut.model_validate(trip).model_copy(
-        update={"email_sent": email_sent if enabled else None, "email_to": email_to}
+        update={
+            "email_sent": email_sent if enabled else None,
+            "email_to": email_to,
+            "email_error": email_error or None,
+        }
     )
 
 

@@ -129,6 +129,7 @@ class TripOut(BaseModel):
     ended_at: Optional[datetime] = None
     email_sent: Optional[bool] = None
     email_to: list[str] = []
+    email_error: Optional[str] = None
 
     model_config = {"from_attributes": True}
 
