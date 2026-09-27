@@ -1,0 +1,786 @@
+SWASEMI FLEET TELEMETRY
+PRINT-READY PROJECT MANUAL
+
+Chapter 1: WHAT THIS PROJECT IS
+
+Swasemi Fleet Telemetry is a multi-tenant fleet operations application. An
+organization can monitor its own vehicles, prepare routes, operate trips, review
+history, and observe environmental telemetry. A Super Admin can see every
+organization and administer users, organizations, and invite links.
+
+Elevator pitch:
+Swasemi receives GPS and sensor messages over MQTT. FastAPI accepts data only
+for active trips, stores accepted samples in PostgreSQL, publishes live events
+through Redis, and sends them over WebSockets to a React and Leaflet map.
+
+The central live-data path is:
+Device or simulator -> MQTT -> active-trip gate -> PostgreSQL and Redis ->
+WebSocket -> React dashboard.
+
+Roles:
+- user: belongs to one organization and can view and operate only its fleet.
+- super_admin: has no organization, can read all fleets and use administration.
+  Super Admins have global visibility but not organization trip-control rights.
+
+Onboarding is invite-only. No public signup endpoint exists.
+
+Chapter 2: COMPLETE FOLDER AND FILE MAP
+
+Repository root:
+- .gitattributes: consistent text and line endings.
+- .gitignore: ignores secrets, environments, caches, node modules, and builds.
+- docker-compose.yml: full PostgreSQL, Redis, backend, simulator, frontend demo.
+- README.md: setup, deployment, and verification guide.
+- PROJECT_HISTORY.md: historical implementation notes; current code wins when
+  history differs.
+- start-all.ps1: Windows local-service launcher.
+- start-all.bat: wrapper for start-all.ps1.
+- PROJECT_MANUAL.txt: this current-code manual.
+
+backend:
+- .env: ignored local configuration and secrets; never commit or print it.
+- .env.example: non-secret configuration template.
+- Dockerfile: Python 3.12 Slim Uvicorn image.
+- requirements.txt: pinned Python dependencies.
+- database.py: engine, sessions, Base, and get_db dependency.
+- models.py: SQLAlchemy persistence model definitions.
+- schemas.py: Pydantic request/response models and validation.
+- auth.py: bcrypt password support, JWT, login, current-user and invite logic.
+- main.py: FastAPI app, CORS, lifecycle, routers, health, MQTT/fanout start.
+- create_tables.py: create_all, force_deviate compatibility ALTER, demo seeds.
+- geo.py: KML/CSV parser and geographic calculations.
+- compliance.py: route distance, alert, cooldown, email, realtime publication.
+- emailer.py: SMTP send/configuration and reserved-domain filter.
+- mqtt_ingest.py: MQTT parse, trip gate, Reading write, Redis/compliance call.
+- realtime.py: payloads, snapshots, Redis subscriber, tenant WebSocket fanout.
+- simulator.py: Gandhinagar GPS and sensor publisher.
+- routers/__init__.py: router package marker.
+- routers/admin.py: Super Admin statistics, organization, user, invite APIs.
+- routers/vehicles.py: vehicle CRUD and saved planned-route APIs.
+- routers/trips.py: trip, deviation, route, reading, alert, export APIs.
+- routers/ws.py: authenticated WebSocket endpoint.
+- tests/conftest.py: SQLite/TestClient fixtures.
+- tests/test_core_flows.py: eight core security and flow tests.
+
+frontend:
+- .gitignore: ignores frontend machine/build files.
+- Dockerfile: Node build followed by Nginx static serving.
+- index.html: Vite HTML shell and app mount.
+- nginx.conf: static SPA fallback, with no API proxy.
+- package.json: scripts and React/Leaflet/Vite dependencies.
+- package-lock.json: exact npm dependency lock.
+- tsconfig.json: TypeScript settings.
+- vite.config.ts: React Vite plugin configuration.
+- public/sample-route.kml: Gandhinagar route sample.
+- src/main.tsx: StrictMode bootstrap and CSS import.
+- src/style.css: responsive visual design and component styles.
+- src/types.ts: shared browser data contracts.
+- src/api.ts: API client, download helper, API/WS address selection.
+- src/App.tsx: login, session, dashboard, vehicle/trip/route controls.
+- src/FleetMap.tsx: Leaflet map, routes, trails, markers, zoom.
+- src/useFleetSocket.ts: snapshot/event/reconnect/trail state.
+- src/geo.ts: browser distance, bearing, duration, speed calculations.
+- src/namedRoutes.ts: Gandhinagar/Infocity presets and CSV conversion.
+- src/TripHistory.tsx: history, temperature chart, CSV export panel.
+- src/SuperAdmin.tsx: platform administration panel.
+- src/JoinScreen.tsx: invite acceptance/password setup screen.
+- src/assets/hero.png: bundled visual asset.
+
+Excluded generated or local directories include backend/venv, Python caches,
+frontend/node_modules, and frontend/dist.
+
+Chapter 3: DATABASE DESIGN AND MULTI-TENANCY
+
+Organization:
+- id primary key, unique name, created_at.
+
+User:
+- id, unique email, password_hash, role, nullable org_id, created_at.
+- user requires an org_id. super_admin must have no org_id.
+
+Invite:
+- id, unique token, org_id, optional restricted email, expires_at, used_at.
+
+Vehicle:
+- id, org_id, display name, unique device_id, created_at.
+
+VehicleRoutePoint:
+- id, vehicle_id, seq, latitude, longitude.
+- Stores the route prepared before a trip.
+
+Trip:
+- id, vehicle_id, org_id, status active/completed, force_deviate,
+  started_at, ended_at.
+
+RoutePoint:
+- id, trip_id, seq, latitude, longitude.
+- Stores the trip route snapshot and may be replaced by active-trip route upload.
+
+Reading:
+- id, trip_id, vehicle_id, org_id, timestamp, latitude, longitude,
+  temperature, humidity, dew_point, elevation.
+- Indexes on trip_id plus timestamp and vehicle_id plus timestamp.
+
+Alert:
+- id, trip_id, vehicle_id, org_id, type, message, latitude, longitude,
+  created_at, emailed_at.
+
+Relationship chain:
+Organization -> Users, Invites, Vehicles, Trips, Readings, Alerts.
+Vehicle -> VehicleRoutePoints and Trips.
+Trip -> RoutePoints, Readings, Alerts.
+
+Tenant enforcement uses direct org_id ownership. Normal route handlers compare
+the requested vehicle ownership to the current database User. Trip, Reading,
+and Alert keep denormalized org_id so tenant-sensitive queries are direct.
+WebSocket events are filtered again per connected user.
+
+Chapter 4: ENVIRONMENT CONFIGURATION
+
+Use backend/.env.example as the template for the ignored backend/.env.
+
+Database and authentication:
+- DATABASE_URL: SQLAlchemy PostgreSQL URL.
+- ENVIRONMENT: development allows a fallback JWT secret; other environments
+  require JWT_SECRET.
+- JWT_SECRET: production signing secret, at least 32 random characters.
+- JWT_ALGORITHM: HS256.
+- ACCESS_TOKEN_EXPIRE_MINUTES: token lifetime, default 60.
+
+Redis:
+- REDIS_URL: Redis connection, default redis://localhost:6379/0.
+- REDIS_CHANNEL: live Pub/Sub channel, default fleet:telemetry.
+
+MQTT:
+- MQTT_HOST: broker hostname, example broker.emqx.io.
+- MQTT_PORT: broker port, example 1883.
+- MQTT_TOPIC: API subscription, normally swasemi/fleet/+/readings.
+- MQTT_PUBLISH_TOPIC_TEMPLATE: simulator publication template.
+- MQTT_USERNAME and MQTT_PASSWORD: optional broker credentials.
+- MQTT_CLIENT_ID: optional API client ID; generated when blank.
+
+Simulator:
+- SIMULATOR_API_URL: backend base URL.
+- SIMULATOR_EMAIL and SIMULATOR_PASSWORD: simulator login.
+- SIMULATOR_POSITION_SPREAD: vehicle starting-position spacing.
+- SIMULATOR_INTERVAL_SECONDS: publication interval.
+- SIMULATOR_MAX_CYCLES: zero runs forever; positive value limits cycles.
+- SIMULATOR_STEP_METERS: GPS route densification spacing.
+
+Browser, invites, compliance:
+- FRONTEND_ORIGINS: allowed CORS browser origins.
+- FRONTEND_PUBLIC_URL: generated invite-link base URL.
+- INVITE_EXPIRE_HOURS: invite lifetime.
+- ROUTE_DEVIATION_METERS: route distance threshold, default 200.
+- ROUTE_ALERT_COOLDOWN_MINUTES: alert suppression interval, default 10.
+- EXPOSE_DEMO_PASSWORD_HINTS: exposes seed hints only when explicitly true.
+
+SMTP and Gmail:
+- SMTP_HOST: Gmail example is smtp.gmail.com.
+- SMTP_PORT: Gmail TLS submission normally uses 587.
+- SMTP_USERNAME: authenticated mailbox address.
+- SMTP_PASSWORD: Gmail App Password, never the ordinary Gmail password.
+- ALERT_FROM_EMAIL: displayed sender; falls back to SMTP_USERNAME or
+  alerts@localhost when blank.
+- SMTP_USE_TLS: secure SMTP negotiation switch.
+
+For Gmail: enable two-step verification, create a Gmail App Password, and place
+it only in backend/.env as SMTP_PASSWORD. Use the mailbox for SMTP_USERNAME and
+ALERT_FROM_EMAIL. Never commit or share the App Password.
+
+emailer.py intentionally blocks recipients ending in example.com, example.org,
+example.net, localhost, or invalid. Demo alerts are still stored and displayed.
+Use real organization email addresses to test delivery.
+
+Chapter 5: LOGIN, JWT, ROLES, AND INVITES
+
+Login:
+1. React calls POST /auth/login with email/password.
+2. auth.py verifies the stored bcrypt-compatible hash.
+3. API returns HS256 JWT claims sub, role, org_id, and expiry.
+4. App.tsx calls GET /auth/me and stores the token as fleet_access_token.
+5. Reload restores the token and asks /auth/me for the live user record.
+
+JWT authorization:
+- get_current_user requires a valid token and current database User.
+- get_current_super_admin requires role super_admin.
+- get_current_org_user requires role user with an organization.
+- A deleted account is rejected on future requests even if its old token remains
+  within expiry, because the user is fetched from the database.
+
+Invite:
+1. Super Admin creates POST /admin/invites with organization and optional email.
+2. Backend creates a random token and expiry.
+3. Recipient opens /?invite=TOKEN.
+4. JoinScreen calls GET /auth/invites/TOKEN.
+5. Recipient posts password, and email for an open invite, to POST /auth/join.
+6. Backend rejects missing, expired, used, mismatched, or duplicate cases;
+   otherwise creates a normal user, marks used_at, and returns JWT.
+
+Chapter 6: VEHICLE AND TRIP LIFECYCLE
+
+Create vehicle:
+1. User submits a vehicle name.
+2. App calls POST /vehicles.
+3. Backend uses the current user org_id and generates device_id as veh- plus
+   12 random hexadecimal characters.
+4. Vehicle is committed and added to frontend live state.
+
+Delete vehicle:
+1. User chooses Delete vehicle.
+2. App calls DELETE /vehicles/{vehicle_id}.
+3. Backend verifies ownership and removes alerts, readings, route points, trips,
+   planned route points, and the vehicle.
+
+Save planned route:
+1. User selects Gandhinagar loop, Infocity corridor, or local KML/CSV.
+2. A preset becomes a lat,lng CSV File in namedRoutes.ts.
+3. Multipart data posts to POST /vehicles/{vehicle_id}/planned-route.
+4. geo.py parses KML LineString or CSV, requires two valid points, and stores
+   ordered VehicleRoutePoint rows. A new plan replaces the old one.
+
+Start trip:
+1. Start trip posts to POST /vehicles/{vehicle_id}/trips/start.
+2. Backend rejects any already-active trip for that vehicle.
+3. Backend rejects fewer than two planned points with Save a planned route
+   before starting a trip.
+4. Backend creates active Trip and copies planned points to RoutePoint.
+5. Frontend initializes the live trail and loads route/readings/alerts.
+
+Stop trip:
+1. Stop trip posts to POST /vehicles/{vehicle_id}/trips/stop.
+2. Backend sets completed, ended_at, and clears force_deviate.
+3. Frontend retains the completed visual trail.
+4. Future messages are rejected until a new active trip exists.
+
+POST /vehicles/{vehicle_id}/trips/{trip_id}/route is an additional active-trip
+KML/CSV route replacement endpoint. The main dashboard normally plans first,
+then starts the trip.
+
+The two named routes are authored coordinate corridors with many local
+street-grid points. They are not live road-snapped directions from a routing API.
+
+Chapter 7: TELEMETRY SIMULATOR
+
+simulator.py is a demonstration device worker.
+
+1. It loads settings and logs into POST /auth/login.
+2. It calls GET /vehicles, so Super Admin credentials discover all tenants.
+3. For each vehicle, it calls GET /vehicles/{id}/trips.
+4. It publishes only when a vehicle has an active trip.
+5. It publishes QoS 1 JSON to swasemi/fleet/{device_id}/readings by default.
+
+The primary loop is a detailed closed Gandhinagar corridor. It is densified at
+SIMULATOR_STEP_METERS, default 30 metres, so two-second updates appear smooth.
+Vehicles are staggered with SIMULATOR_POSITION_SPREAD. Normal samples include
+small positional variance, occasional held positions, and plausible temperature,
+humidity, dew-point, and elevation values.
+
+When Trip.force_deviate is true, the simulator offsets the position well beyond
+the normal route threshold. It triggers the real server compliance flow rather
+than a fake frontend alert.
+
+The simulator is not a security boundary. mqtt_ingest.py repeats the active-trip
+check, so broken or malicious publishing cannot store data for stopped trips.
+
+Chapter 8: LIVE TELEMETRY FLOW AND REDIS
+
+1. MQTT message arrives on swasemi/fleet/{device_id}/readings.
+2. mqtt_ingest.py parses JSON, validates coordinates, and identifies device_id.
+3. It looks up the Vehicle. Unknown devices are logged and dropped.
+4. It looks for an active Trip. No active trip means no Reading is written.
+5. It stores the Reading with trip, vehicle, org, timestamp, GPS, and sensors.
+6. realtime.py publishes normalized reading data to Redis fleet:telemetry.
+7. compliance.py checks route distance and may write/publish Alert.
+8. redis_fanout_loop consumes Redis events.
+9. ConnectionManager filters each event by org_id before WebSocket send.
+10. useFleetSocket merges the update and appends its trail point.
+11. FleetMap glides the marker over 1.8 seconds and draws the live path.
+
+Why Redis:
+- It separates fast device ingestion from slow browser connections.
+- The MQTT path stores/publishes a compact event instead of iterating clients.
+- It supports multiple API processes and independent WebSocket client groups.
+- It preserves the simple device topic protocol while dashboard connections vary.
+
+WebSocket connection:
+ws://host/ws?token=JWT. The endpoint authenticates, builds a tenant-filtered
+vehicle/latest-reading snapshot, sends it first, then streams Redis events.
+The browser reconnect delay is exponential and capped at ten seconds.
+
+Chapter 9: ROUTE DEVIATION AND EMAIL ALERTS
+
+1. Every accepted Reading enters evaluate_route_compliance.
+2. The trip RoutePoint polyline is loaded; fewer than two points skips checking.
+3. geo.py projects the GPS point against every segment in local metres and finds
+   the shortest distance.
+4. At or under ROUTE_DEVIATION_METERS: no alert.
+5. Over threshold: latest same-trip route_deviation alert is checked against
+   ROUTE_ALERT_COOLDOWN_MINUTES.
+6. When allowed, Alert is saved with distance and location.
+7. Alert is published through Redis and WebSocket.
+8. All organization users are considered for SMTP. Reserved demo domains are
+   filtered. Successful SMTP delivery stamps emailed_at.
+
+Manual Deviate:
+- Active organization-user vehicle card calls POST
+  /vehicles/{vehicle_id}/trips/{trip_id}/deviate.
+- Return to route calls the matching /deviate/reset endpoint.
+- Only the owning organization and an active trip may change this flag.
+- The simulator produces off-route coordinates and invokes the normal database,
+  SMTP, Redis, and browser alert path.
+
+Chapter 10: DASHBOARD BUTTON-TO-BACKEND MAP
+
+Login:
+- Sign in -> POST /auth/login, then GET /auth/me.
+- View/Hide password -> frontend input toggle only.
+
+Dashboard:
+- Vehicle row/map marker -> frontend selection and data load.
+- Card close cross -> setVehicleCardOpen false only; it hides the card. Selecting
+  a vehicle opens it again.
+- Super Admin organization filter -> frontend display filter only.
+- Sign out -> removes localStorage token.
+- Admin Console -> opens SuperAdmin UI.
+
+Organization-user controls:
+- Add vehicle -> POST /vehicles.
+- Delete vehicle -> DELETE /vehicles/{vehicle_id}.
+- Preset selector/file chooser -> frontend state/file selection.
+- Save route -> POST /vehicles/{vehicle_id}/planned-route.
+- Start trip -> POST /vehicles/{vehicle_id}/trips/start.
+- Stop trip -> POST /vehicles/{vehicle_id}/trips/stop.
+- Deviate -> POST /vehicles/{vehicle_id}/trips/{trip_id}/deviate.
+- Return to route -> POST /vehicles/{vehicle_id}/trips/{trip_id}/deviate/reset.
+- View trip history -> GET /vehicles/{vehicle_id}/trips.
+
+Trip History:
+- Select trip -> GET readings and route.
+- Close -> frontend-only.
+- Download CSV -> GET /vehicles/{vehicle_id}/trips/{trip_id}/export.csv.
+
+Super Admin:
+- Initial load -> GET /admin/stats, organizations, users, invites.
+- Add organization -> POST /admin/organizations.
+- Delete organization -> DELETE /admin/organizations/{org_id}.
+- Reset Pass -> browser prompt, then POST /admin/users/{id}/reset-password.
+- Delete standard user -> DELETE /admin/users/{id}; backend protects Super Admin.
+- Generate invite -> POST /admin/invites.
+- Copy -> browser clipboard only.
+- Revoke -> DELETE /admin/invites/{id}.
+- Search/maximize/close -> frontend-only state.
+
+Current implementation caveat:
+The Super Admin form offers a Super Admin role choice, but api.ts createUser
+always sends role user and requires an organization ID. The backend supports true
+super_admin creation with null org_id, but that frontend option is not correctly
+wired. The normal organization-user create path is the working UI path.
+
+Chapter 11: DEPLOYMENT MODES
+
+Mode A: local Windows development.
+Run start-all.ps1 or start-all.bat. It:
+1. Stops stale Swasemi simulator/Uvicorn processes.
+2. Starts Docker PostgreSQL and Redis only.
+3. Starts local Uvicorn at 127.0.0.1:8000 and waits for /health.
+4. Starts Vite at localhost:5173.
+5. Starts simulator.py with Super Admin demo credentials.
+
+Mode B: complete Docker demo.
+Run docker compose up --build -d.
+- postgres: PostgreSQL 16 on host port 5433.
+- redis: Redis 7 on host port 6379.
+- backend: FastAPI on host port 8000.
+- simulator: python simulator.py worker.
+- frontend: static Nginx app on host ports 80 and 5173.
+
+Do not run both modes together; host ports collide.
+
+GET /health checks PostgreSQL with SELECT 1 and Redis with PING. It returns
+HTTP 503 if either dependency is unavailable. FastAPI startup calls init_db,
+starts MQTT, and launches Redis fanout.
+
+VITE_API_URL is the build-time browser API base URL. Blank defaults to
+http://127.0.0.1:8000. VITE_WS_URL is the optional build-time WebSocket URL.
+Blank derives ws/wss plus /ws from API_URL.
+
+For separate hosting, build using public values such as:
+VITE_API_URL=https://api.example.com
+VITE_WS_URL=wss://api.example.com/ws
+
+Nginx serves only static files and does not proxy API/WS paths to a private
+backend hostname. Set FRONTEND_ORIGINS to the deployed browser origin and
+FRONTEND_PUBLIC_URL to the public invite-link origin.
+
+Chapter 12: SPOKEN TECHNICAL QUESTIONS AND ANSWERS
+
+Question: What happens when a tracker sends location?
+Answer: MQTT reaches the backend, which resolves device ID, enforces active
+trip, persists Reading, publishes Redis, checks route compliance, and pushes
+tenant-filtered WebSocket data to the map.
+
+Question: How is tenant isolation enforced?
+Answer: Normal users carry organization ownership in the database and token.
+Vehicle ownership is checked on APIs, direct org_id exists on sensitive child
+records, and each WebSocket event is filtered again for every connection.
+
+Question: Why enforce active trip on the server?
+Answer: The device simulator cannot be trusted as an authority. The server gate
+protects storage and reporting even if another publisher is incorrectly sending.
+
+Question: Why Redis?
+Answer: It decouples ingestion from browser fanout, keeps MQTT processing fast,
+and provides a shared event channel suitable for more than one API process.
+
+Question: How does deviation work?
+Answer: Backend projects each GPS point onto every planned polyline segment,
+compares the nearest metre distance to a configurable threshold, persists and
+streams an alert, and attempts SMTP subject to cooldown and recipient filtering.
+
+Question: Is the map route a directions engine?
+Answer: No. Leaflet displays OpenStreetMap tiles and stored coordinate corridors.
+No Google Directions, OSRM, Mapbox Directions, or dynamic road-snapping service
+is currently integrated.
+
+Question: How are passwords protected?
+Answer: Only password hashes are stored. Login returns short-lived signed JWT.
+SMTP credentials must remain only in ignored backend/.env.
+
+Question: What should be hardened for production?
+Answer: Private authenticated MQTT with ACLs, migrations, upload/rate limits,
+token refresh/revocation, WebSocket re-authentication, secret management,
+observability, retention/partitioning, and a routing API if road snapping is
+required.
+
+Question: What is tested?
+Answer: Pytest uses SQLite fixtures to cover successful/failed login, tenant
+vehicle visibility, Super Admin visibility, start-route prerequisite, inactive
+trip ingestion drop, active-trip ingestion, and deviation alert creation.
+
+Chapter 13: FIVE-TO-EIGHT-MINUTE LIVE DEMO SCRIPT
+
+Preparation:
+1. Start one deployment mode and wait for /health status ok.
+2. Open localhost:5173 or the deployed frontend URL.
+3. Use a seeded vehicle with no active trip.
+
+Minute 0-1:
+Say: Swasemi is a multi-tenant fleet telemetry platform. MQTT flows through
+FastAPI trip validation into PostgreSQL and Redis, then WebSockets update this
+live dashboard. Organizations see their own fleet; Super Admin has global view.
+
+Minute 1-2:
+Log in as usera@example.com with usera-pass. Show vehicle list, map,
+connection state, sensor tiles, and selected vehicle card. Explain that readings
+are not persisted until a trip becomes active.
+
+Minute 2-3:
+Select Gandhinagar loop, press Save route, then Start trip. Explain multipart
+KML/CSV validation, saved VehicleRoutePoint records, and copied Trip route
+snapshot. Mention Start rejects a route with fewer than two points.
+
+Minute 3-4:
+Wait for simulator updates. Show marker motion, last seen, sensor data, green
+planned route, and blue live trail. Explain active-trip gate, PostgreSQL,
+Redis fanout, and tenant-filtered WebSocket.
+
+Minute 4-5:
+Press Deviate. Explain it toggles the active trip flag and makes the simulator
+send real off-route points. Show alert and explain distance calculation, Alert
+storage, Redis publication, cooldown, and SMTP attempt. Explain example.com
+demo recipients are intentionally not emailed.
+
+Minute 5-6:
+Press Stop trip. Explain later telemetry is dropped until a new trip. Open trip
+history, select the latest trip, show GPS trail/temperature chart, and download
+CSV.
+
+Minute 6-7:
+Sign out, log in as admin@example.com with adminpass, and open Admin Console.
+Show KPIs, users, organizations, invite links, and all-fleet map visibility.
+Explain Super Admin reads globally but cannot operate an organization trip.
+
+Minute 7-8:
+Close with the deployment story: Docker Compose runs PostgreSQL, Redis, API,
+simulator, and frontend. Production next steps are private MQTT ACLs,
+migrations, strong secret handling, scale-aware telemetry storage, and a real
+routing provider if road-snapped navigation is needed.
+
+Seeded demonstration accounts:
+- Super Admin: admin@example.com / adminpass.
+- Org A user: usera@example.com / usera-pass.
+- Org B user: userb@example.com / userb-pass.
+
+
+
+Chapter 14: VERCEL FRONTEND AND AWS BACKEND DEPLOYMENT
+
+Recommended production shape:
+Vercel hosts the static React/Vite frontend. AWS hosts the private application
+services in one region. The public browser reaches FastAPI through an HTTPS
+Application Load Balancer. PostgreSQL and Redis remain private managed services.
+
+Production architecture:
+Browser -> Vercel static frontend -> HTTPS API domain on AWS ALB -> ECS Fargate
+FastAPI service -> RDS PostgreSQL and ElastiCache Redis.
+Simulator ECS task -> public/private MQTT broker -> FastAPI MQTT client.
+FastAPI -> SMTP provider for deliverable route-deviation alerts.
+
+Do not put VITE_API_URL secrets in Vercel. Anything prefixed VITE_ is compiled
+into browser JavaScript and is publicly visible. API and WebSocket URLs are
+appropriate there because they are public endpoints. JWT_SECRET, database
+passwords, SMTP App Password, and broker credentials belong only on AWS.
+
+PART A: DEPLOY FRONTEND TO VERCEL
+
+Before starting:
+- Put the repository in GitHub, GitLab, or Bitbucket.
+- Deploy the AWS API first, or reserve its final public API domain such as
+  https://api.yourdomain.com.
+- Ensure the API ALB has a valid HTTPS certificate and forwards port 443 to
+  FastAPI port 8000.
+
+Vercel dashboard method:
+1. Sign in to Vercel and choose Add New -> Project.
+2. Import this repository from the connected Git provider.
+3. Set Root Directory to frontend. This is important because package.json,
+   vite.config.ts, and index.html live in frontend.
+4. Let Vercel detect Vite, or set:
+   - Install Command: npm install
+   - Build Command: npm run build
+   - Output Directory: dist
+5. In Project Settings -> Environment Variables, add these Production values:
+   - VITE_API_URL = https://api.yourdomain.com
+   - VITE_WS_URL = wss://api.yourdomain.com/ws
+6. Also add equivalent Preview values pointing to a safe staging API, not the
+   production API, when a staging environment exists.
+7. Deploy. Vercel runs the Vite build and serves the dist static output through
+   its CDN.
+8. Copy the production Vercel URL or attach a custom domain such as
+   https://app.yourdomain.com.
+9. Set the AWS backend FRONTEND_ORIGINS to that exact browser origin and set
+   FRONTEND_PUBLIC_URL to the same origin. Redeploy the backend task.
+10. Test browser login, GET /health through the API URL, API CORS, and the
+    WebSocket connection indicator.
+
+Vercel CLI alternative from the repository root:
+1. Change directory to frontend.
+2. Install CLI once: npm install -g vercel.
+3. Link: vercel link.
+4. Add VITE_API_URL and VITE_WS_URL in the Vercel dashboard, or with vercel env.
+5. Create a preview: vercel deploy.
+6. Release production: vercel deploy --prod.
+
+Important Vercel behavior:
+- Vite reads VITE_ variables during build. Changing a Vercel variable requires
+  a new deployment; it does not alter an already-built frontend.
+- Do not deploy the frontend Dockerfile to Vercel. Vercel can build this Vite
+  project directly. The Dockerfile remains useful for the Docker Compose demo
+  or another container-based static-hosting platform.
+- The deployed frontend must use HTTPS and wss://. A browser page served by
+  HTTPS normally blocks an insecure ws:// WebSocket endpoint.
+
+PART B: PREPARE AWS NETWORKING
+
+Use one AWS Region and a VPC with:
+- Two public subnets for the internet-facing Application Load Balancer.
+- At least two private subnets for ECS Fargate tasks, RDS PostgreSQL, and
+  ElastiCache Redis.
+- An ALB security group allowing public HTTPS port 443.
+- An ECS task security group allowing port 8000 only from the ALB security
+  group.
+- An RDS security group allowing PostgreSQL port 5432 only from the ECS task
+  security group.
+- An ElastiCache security group allowing Redis port 6379 only from the ECS
+  task security group.
+
+Never expose RDS or ElastiCache directly to the public internet. Use an ACM TLS
+certificate on the ALB, create an HTTPS listener, and use Route 53 or another
+DNS provider to point api.yourdomain.com to the ALB.
+
+PART C: CREATE AWS MANAGED DATA SERVICES
+
+1. Create Amazon RDS for PostgreSQL in private subnets.
+   - Use PostgreSQL.
+   - Create a database named fleet and a dedicated application user.
+   - Enable backups and choose a production-size instance appropriate to load.
+   - Store the generated database URL securely.
+
+2. Create ElastiCache for Redis OSS in private subnets.
+   - Use a Redis replication group or an appropriate managed Redis offering.
+   - Require encryption/authentication according to the chosen configuration.
+   - Capture the private endpoint for REDIS_URL.
+   - Do not use the local Compose URL in AWS.
+
+3. Create AWS Secrets Manager secrets for:
+   - DATABASE_URL
+   - JWT_SECRET
+   - SMTP_USERNAME
+   - SMTP_PASSWORD
+   - SMTP sender/other sensitive mail configuration
+   - MQTT_USERNAME and MQTT_PASSWORD when the broker requires them
+   - Simulator credentials if the simulator runs from a restricted account
+
+AWS recommends Secrets Manager or Systems Manager Parameter Store for sensitive
+ECS values. Plain ECS task-definition environment variables can be read by
+identities allowed to describe the task definition.
+
+PART D: PUBLISH BACKEND IMAGE TO AMAZON ECR
+
+The existing backend/Dockerfile is the image for FastAPI and simulator. Create
+an ECR repository named swasemi-backend, then from the repository root run the
+following after replacing REGION and ACCOUNT_ID:
+
+aws ecr create-repository --repository-name swasemi-backend --region REGION
+aws ecr get-login-password --region REGION | docker login --username AWS --password-stdin ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com
+docker build -t swasemi-backend:release ./backend
+docker tag swasemi-backend:release ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/swasemi-backend:release
+docker push ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/swasemi-backend:release
+
+Use immutable release tags based on a Git commit or release number in real
+deployments. Do not rely on a mutable latest tag for rollback decisions.
+
+PART E: CREATE ECS FARGATE API SERVICE
+
+1. Create an ECS cluster using Fargate.
+2. Create a task execution IAM role. It needs permission to pull the ECR image,
+   send logs to CloudWatch, and retrieve referenced secrets.
+3. Create a task definition named swasemi-api:
+   - Launch type: Fargate.
+   - Image: the ECR swasemi-backend release tag.
+   - Container port: 8000.
+   - Command: leave the Dockerfile Uvicorn command unchanged.
+   - Health check: call the service health endpoint through the ALB. The
+     application /health verifies both PostgreSQL and Redis.
+   - Logging: send container logs to a CloudWatch Logs group.
+   - Task security group: private ECS task group described above.
+4. Provide non-secret environment values:
+   - ENVIRONMENT=production
+   - JWT_ALGORITHM=HS256
+   - ACCESS_TOKEN_EXPIRE_MINUTES=60
+   - REDIS_CHANNEL=fleet:telemetry
+   - MQTT_HOST and MQTT_PORT
+   - MQTT_TOPIC=swasemi/fleet/+/readings
+   - MQTT_PUBLISH_TOPIC_TEMPLATE=swasemi/fleet/{device_id}/readings
+   - FRONTEND_ORIGINS=https://app.yourdomain.com
+   - FRONTEND_PUBLIC_URL=https://app.yourdomain.com
+   - INVITE_EXPIRE_HOURS=72
+   - ROUTE_DEVIATION_METERS=200
+   - ROUTE_ALERT_COOLDOWN_MINUTES=10
+   - SMTP_PORT=587
+   - SMTP_USE_TLS=true
+   - EXPOSE_DEMO_PASSWORD_HINTS=false
+5. Inject secret values from Secrets Manager:
+   - DATABASE_URL
+   - REDIS_URL if treated as sensitive by policy
+   - JWT_SECRET
+   - SMTP_USERNAME
+   - SMTP_PASSWORD
+   - ALERT_FROM_EMAIL if treated as sensitive by policy
+   - MQTT_USERNAME and MQTT_PASSWORD when used
+6. Create an ECS service with at least one task, attached to an Application
+   Load Balancer target group that forwards HTTP port 8000.
+7. Configure ALB listener HTTPS 443 and health check path /health.
+8. Set DNS api.yourdomain.com to the ALB and verify:
+   - https://api.yourdomain.com/health
+   - https://api.yourdomain.com/docs
+   - wss://api.yourdomain.com/ws?token=VALID_JWT from the deployed frontend.
+
+FastAPI startup currently runs init_db. On a new database it creates tables and
+seeds demo accounts. This is convenient for a demonstration, but production
+should replace create_all/seed behavior with controlled migrations and explicit
+initial provisioning before scaling API tasks.
+
+PART F: DEPLOY THE SIMULATOR AS A SEPARATE ECS WORKLOAD
+
+The simulator uses the same ECR image but a different command:
+python simulator.py
+
+Create a second Fargate task definition named swasemi-simulator:
+- Image: same ECR swasemi-backend release tag.
+- Command override: python simulator.py.
+- No public inbound port or ALB target group.
+- Network: private subnet with outbound connectivity to the API and MQTT broker.
+- Logging: its own CloudWatch Logs stream/group.
+- Environment: SIMULATOR_API_URL=https://api.yourdomain.com,
+  SIMULATOR_INTERVAL_SECONDS=2, and non-secret MQTT values.
+- Secrets: SIMULATOR_EMAIL, SIMULATOR_PASSWORD, plus broker credentials when
+  applicable.
+
+Run exactly one simulator task for the demonstration. Multiple simulator tasks
+would each publish a full fleet and produce duplicate readings. For persistent
+demo behavior, use an ECS service with desired count 1; for a controlled run,
+use Run Task and stop it afterwards.
+
+PART G: WHAT EACH CURRENT CONTAINER MEANS
+
+postgres container:
+- Current Compose image: postgres:16.
+- Role: durable relational storage for organizations, users, vehicles, trips,
+  readings, routes, and alerts.
+- Why containerized locally: repeatable versioned database with persistent
+  pgdata volume and no local PostgreSQL installation requirement.
+- AWS production equivalent: Amazon RDS for PostgreSQL, not an internet-exposed
+  self-managed database container.
+
+redis container:
+- Current Compose image: redis:7.
+- Role: Pub/Sub transport between MQTT ingestion/compliance and WebSocket fanout.
+- Why containerized locally: lightweight local event bus that matches backend
+  behavior.
+- AWS production equivalent: Amazon ElastiCache for Redis OSS in private subnets.
+
+backend container:
+- Current Compose build: backend/Dockerfile.
+- Role: FastAPI REST API, JWT/CORS, database access, MQTT subscriber, route
+  compliance, Redis publishing/fanout, and WebSocket endpoint.
+- Why containerized: the Python runtime and pinned dependencies behave the same
+  across developer machines, Docker Compose, ECS, and CI.
+- AWS production equivalent: ECS Fargate service behind an ALB.
+
+simulator container:
+- Current Compose build: same backend/Dockerfile, command python simulator.py.
+- Role: synthetic device publisher for live demonstrations.
+- Why separate: it has an independent lifecycle and should not restart the API
+  when demo telemetry is stopped or changed.
+- AWS production equivalent: one separate ECS Fargate task/service with no
+  inbound public port.
+
+frontend container:
+- Current Compose build: frontend/Dockerfile, Node build stage plus Nginx.
+- Role: compiles Vite assets and serves the static single-page application.
+- Why containerized: complete Docker Compose can launch the whole demo on one
+  machine, and the same image can run on a generic container host.
+- Vercel equivalent: Vercel builds frontend with npm run build and serves dist
+  on its CDN. The frontend container is not needed on Vercel.
+
+Why containerization matters:
+- Reproducibility: the same image, runtime, and pinned dependencies are used
+  from laptop to cloud.
+- Isolation: Python/Node/PostgreSQL/Redis dependencies do not conflict with
+  host-machine installations.
+- Deployment: ECR stores versioned images; ECS starts known images consistently.
+- Scaling: API and simulator can scale or restart independently.
+- Operations: health checks, logs, environment injection, and rollbacks are
+  managed per workload.
+
+PART H: FINAL DEPLOYMENT CHECKLIST
+
+1. Build and push the API image to ECR.
+2. Create private RDS and ElastiCache endpoints.
+3. Put secrets in Secrets Manager and reference them from ECS.
+4. Deploy one ECS API service behind HTTPS ALB.
+5. Deploy one ECS simulator task only after API health succeeds.
+6. Configure Vercel VITE_API_URL and VITE_WS_URL with the HTTPS/WSS API domain.
+7. Deploy Vercel production frontend.
+8. Set backend FRONTEND_ORIGINS and FRONTEND_PUBLIC_URL to the Vercel domain.
+9. Test login, CORS, /health, live WebSocket, start/stop trip, history CSV,
+   route deviation, and email with a real recipient domain.
+10. Keep PostgreSQL, Redis, ECS tasks, and secrets private; expose only the ALB
+    HTTPS endpoint and the Vercel frontend.
+
+END OF DEPLOYMENT ADDENDUM
+
+END OF MANUAL
+

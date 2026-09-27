@@ -35,6 +35,9 @@ export function SuperAdmin({ token, onClose }: SuperAdminProps) {
   const [inviteEmail, setInviteEmail] = useState('')
   const [copied, setCopied] = useState('')
   const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [busyAction, setBusyAction] = useState('')
 
   // Create user form state
   const [newUserEmail, setNewUserEmail] = useState('')
@@ -45,6 +48,7 @@ export function SuperAdmin({ token, onClose }: SuperAdminProps) {
   const [deletingInviteId, setDeletingInviteId] = useState<number | null>(null)
 
   async function loadData() {
+    setLoading(true)
     try {
       const [nextStats, nextOrgs, nextUsers, nextInvites] = await Promise.all([
         getPlatformStats(token),
@@ -61,6 +65,8 @@ export function SuperAdmin({ token, onClose }: SuperAdminProps) {
       }
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Could not load platform metrics')
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -73,13 +79,17 @@ export function SuperAdmin({ token, onClose }: SuperAdminProps) {
     event.preventDefault()
     if (!orgName.trim()) return
     setError('')
+    setBusyAction('organization')
     try {
       const newOrg = await createOrganization(orgName.trim(), token)
       setOrgName('')
       setSelectedOrgId(newOrg.id)
       await loadData()
+      setSuccess('Organization created')
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Could not create organization')
+    } finally {
+      setBusyAction('')
     }
   }
 
@@ -92,6 +102,7 @@ export function SuperAdmin({ token, onClose }: SuperAdminProps) {
     try {
       await deleteOrganization(orgId, token)
       await loadData()
+      setSuccess('Organization deleted')
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Could not delete organization')
     } finally {
@@ -107,6 +118,7 @@ export function SuperAdmin({ token, onClose }: SuperAdminProps) {
       return
     }
     setError('')
+    setBusyAction('user')
     try {
       await createUser(
         newUserEmail.trim(),
@@ -117,8 +129,11 @@ export function SuperAdmin({ token, onClose }: SuperAdminProps) {
       setNewUserEmail('')
       setNewUserPassword('')
       await loadData()
+      setSuccess('User account created')
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Could not create user')
+    } finally {
+      setBusyAction('')
     }
   }
 
@@ -130,6 +145,7 @@ export function SuperAdmin({ token, onClose }: SuperAdminProps) {
       await deleteUser(userId, token)
       setUsers((current) => current.filter((u) => u.id !== userId))
       await loadData()
+      setSuccess('User deleted')
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Could not delete user')
     } finally {
@@ -141,12 +157,15 @@ export function SuperAdmin({ token, onClose }: SuperAdminProps) {
     const newPass = window.prompt(`Enter new password for ${email}:`)
     if (!newPass || !newPass.trim()) return
     setError('')
+    setBusyAction(`reset-${userId}`)
     try {
       await resetUserPassword(userId, newPass.trim(), token)
-      alert(`Password updated successfully for ${email}!`)
       await loadData()
+      setSuccess(`Password reset for ${email}`)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Could not reset password')
+    } finally {
+      setBusyAction('')
     }
   }
 
@@ -154,14 +173,18 @@ export function SuperAdmin({ token, onClose }: SuperAdminProps) {
     event.preventDefault()
     if (selectedOrgId === null) return
     setError('')
+    setBusyAction('invite')
     try {
       const invite = await createInvite(selectedOrgId, token, inviteEmail.trim() || undefined)
       setInviteEmail('')
       setInvites((current) => [invite, ...current])
       await navigator.clipboard.writeText(invite.invite_url)
       setCopied(invite.invite_url)
+      setSuccess('Invite link copied')
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Could not create invite')
+    } finally {
+      setBusyAction('')
     }
   }
 
@@ -171,6 +194,7 @@ export function SuperAdmin({ token, onClose }: SuperAdminProps) {
     try {
       await deleteInvite(inviteId, token)
       setInvites((current) => current.filter((inv) => inv.id !== inviteId))
+      setSuccess('Invite revoked')
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Could not delete invite')
     } finally {
@@ -183,6 +207,15 @@ export function SuperAdmin({ token, onClose }: SuperAdminProps) {
     const q = userSearch.toLowerCase()
     return u.email.toLowerCase().includes(q) || (u.org_name && u.org_name.toLowerCase().includes(q)) || u.role.toLowerCase().includes(q)
   })
+
+  useEffect(() => {
+    if (!success && !copied) return
+    const timer = window.setTimeout(() => {
+      setSuccess('')
+      setCopied('')
+    }, 2600)
+    return () => window.clearTimeout(timer)
+  }, [copied, success])
 
   return (
     <aside
@@ -213,7 +246,14 @@ export function SuperAdmin({ token, onClose }: SuperAdminProps) {
         </div>
       </div>
 
-      {error && <div className="form-error compact" style={{ marginBottom: '12px' }}>{error}</div>}
+      {error && (
+        <div className="form-error compact dismissible-error" style={{ marginBottom: '12px' }} role="alert">
+          <span>{error}</span>
+          <button type="button" onClick={() => setError('')}>Dismiss</button>
+        </div>
+      )}
+      {success && <div className="admin-success" role="status">{success}</div>}
+      {loading && <div className="panel-loading"><span className="loader" /> Loading platform data…</div>}
 
       {/* ── KPI Platform Stats Bar ── */}
       {stats && (
@@ -305,6 +345,7 @@ export function SuperAdmin({ token, onClose }: SuperAdminProps) {
                     <button
                       type="button"
                       onClick={() => handleResetPassword(user.id, user.email)}
+                      disabled={busyAction === `reset-${user.id}`}
                       style={{
                         background: '#ebf8ff',
                         border: '1px solid #bee3f8',
@@ -317,7 +358,7 @@ export function SuperAdmin({ token, onClose }: SuperAdminProps) {
                         flexShrink: 0,
                       }}
                     >
-                      Reset Pass
+                      {busyAction === `reset-${user.id}` ? 'Resetting…' : 'Reset Pass'}
                     </button>
 
                     {user.role !== 'super_admin' ? (
@@ -407,8 +448,8 @@ export function SuperAdmin({ token, onClose }: SuperAdminProps) {
                 )}
               </div>
 
-              <button type="submit" className="upload-button" style={{ marginTop: '6px' }}>
-                Create Account
+              <button type="submit" className="upload-button" style={{ marginTop: '6px' }} disabled={busyAction === 'user'}>
+                {busyAction === 'user' ? 'Creating…' : 'Create Account'}
               </button>
             </form>
           </div>
@@ -427,8 +468,8 @@ export function SuperAdmin({ token, onClose }: SuperAdminProps) {
                   placeholder="New organization name..."
                   style={{ flex: 1 }}
                 />
-                <button type="submit" className="upload-button" style={{ padding: '6px 12px' }}>
-                  Add
+                <button type="submit" className="upload-button" style={{ padding: '6px 12px' }} disabled={busyAction === 'organization'}>
+                  {busyAction === 'organization' ? 'Adding…' : 'Add'}
                 </button>
               </div>
             </form>
@@ -491,8 +532,8 @@ export function SuperAdmin({ token, onClose }: SuperAdminProps) {
                 />
               </label>
 
-              <button type="submit" className="trip-button start">
-                Generate Invite Link
+              <button type="submit" className="trip-button start" disabled={busyAction === 'invite'}>
+                {busyAction === 'invite' ? 'Generating…' : 'Generate Invite Link'}
               </button>
             </form>
 

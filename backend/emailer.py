@@ -25,8 +25,12 @@ def _deliverable(address: str) -> bool:
     return domain not in UNDELIVERABLE_DOMAINS
 
 
+def deliverable_recipients(addresses: list[str]) -> list[str]:
+    return [address for address in addresses if address and _deliverable(address)]
+
+
 def send_email(to_addresses: list[str], subject: str, body: str) -> bool:
-    recipients = [address for address in to_addresses if address and _deliverable(address)]
+    recipients = deliverable_recipients(to_addresses)
     if not recipients:
         logger.warning("No recipients for alert email")
         return False

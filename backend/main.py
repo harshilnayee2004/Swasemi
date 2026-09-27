@@ -3,12 +3,14 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
 from auth import router as auth_router
+from database import engine
 from mqtt_ingest import start_mqtt, stop_mqtt
-from realtime import redis_fanout_loop
+from realtime import get_sync_redis, redis_fanout_loop
 from routers.admin import router as admin_router
 from routers.trips import router as trips_router
 from routers.vehicles import router as vehicles_router
@@ -19,11 +21,9 @@ logging.basicConfig(level=logging.INFO)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    try:
-        from create_tables import init_db
-        init_db()
-    except Exception as e:
-        logging.error(f"Failed to initialize database: {e}")
+    from create_tables import init_db
+
+    init_db()
     start_mqtt()
     fanout_task = asyncio.create_task(redis_fanout_loop())
     try:
@@ -61,4 +61,21 @@ app.include_router(ws_router)
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    dependencies = {"database": "ok", "redis": "ok"}
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+    except Exception:
+        logging.exception("Health check database dependency failed")
+        dependencies["database"] = "error"
+    try:
+        get_sync_redis().ping()
+    except Exception:
+        logging.exception("Health check Redis dependency failed")
+        dependencies["redis"] = "error"
+    if "error" in dependencies.values():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"status": "error", **dependencies},
+        )
+    return {"status": "ok", **dependencies}

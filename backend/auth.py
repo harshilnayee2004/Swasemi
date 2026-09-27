@@ -12,7 +12,12 @@ from database import get_db
 from models import Invite, Organization, User
 from schemas import InvitePublic, JoinRequest, LoginRequest, TokenResponse, UserOut
 
-JWT_SECRET = os.getenv("JWT_SECRET", "dev-insecure-change-me-use-32b+x")
+ENVIRONMENT = os.getenv("ENVIRONMENT", "development").lower()
+JWT_SECRET = os.getenv("JWT_SECRET")
+if not JWT_SECRET:
+    if ENVIRONMENT != "development":
+        raise RuntimeError("JWT_SECRET must be configured outside development")
+    JWT_SECRET = "dev-insecure-change-me-use-32b+x"
 JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
 

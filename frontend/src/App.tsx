@@ -60,11 +60,6 @@ function vehicleFromRecord(record: VehicleRecord): LiveVehicle {
   }
 }
 
-const DEMO_LOGINS = [
-  { label: 'Org A user', email: 'usera@example.com', password: 'usera-pass' },
-  { label: 'Super Admin', email: 'admin@example.com', password: 'adminpass' },
-] as const
-
 function LoginScreen({ onAuthenticated }: { onAuthenticated: (token: string, user: CurrentUser) => void }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -160,22 +155,6 @@ function LoginScreen({ onAuthenticated }: { onAuthenticated: (token: string, use
               )}
             </div>
           )}
-          <div className="demo-logins">
-            {DEMO_LOGINS.map((account) => (
-              <button
-                key={account.email}
-                type="button"
-                className="demo-login"
-                onClick={() => {
-                  setEmail(account.email)
-                  setPassword(account.password)
-                  setError('')
-                }}
-              >
-                {account.label}
-              </button>
-            ))}
-          </div>
           <button type="submit" className="primary-button" disabled={submitting}>
             {submitting ? 'Signing in…' : 'Sign in'}
           </button>
@@ -195,8 +174,11 @@ function Dashboard({ token, user, onLogout }: DashboardProps) {
   const { vehicles, alerts, trails, connection, updateTrip, seedTrail, setAlerts, addVehicle, removeVehicle } = useFleetSocket(token)
   const [selectedOrg, setSelectedOrg] = useState<number | 'all'>('all')
   const [selectedVehicleId, setSelectedVehicleId] = useState<number | null>(null)
+  const [vehicleCardOpen, setVehicleCardOpen] = useState(true)
   const [tripBusy, setTripBusy] = useState<number | null>(null)
   const [actionError, setActionError] = useState('')
+  const [successMessage, setSuccessMessage] = useState('')
+  const [vehiclesLoading, setVehiclesLoading] = useState(true)
   const [now, setNow] = useState(Date.now())
   const [route, setRoute] = useState<RoutePoint[]>([])
   const [plannedCount, setPlannedCount] = useState(0)
@@ -223,10 +205,18 @@ function Dashboard({ token, user, onLogout }: DashboardProps) {
   }, [])
 
   useEffect(() => {
+    setVehiclesLoading(true)
     listVehicles(token)
       .then((records) => records.forEach((record) => addVehicle(vehicleFromRecord(record))))
       .catch(() => undefined)
+      .finally(() => setVehiclesLoading(false))
   }, [token, addVehicle])
+
+  useEffect(() => {
+    if (!successMessage) return
+    const timer = window.setTimeout(() => setSuccessMessage(''), 2600)
+    return () => window.clearTimeout(timer)
+  }, [successMessage])
 
   const organizations = useMemo(() => {
     const byId = new Map<number, string>()
@@ -352,6 +342,7 @@ function Dashboard({ token, user, onLogout }: DashboardProps) {
       setNewVehicleName('')
       setPlannedCount(0)
       setRoute([])
+      setSuccessMessage('Vehicle added')
     } catch (reason) {
       setActionError(reason instanceof Error ? reason.message : 'Could not create vehicle')
     } finally {
@@ -374,6 +365,7 @@ function Dashboard({ token, user, onLogout }: DashboardProps) {
         setRoute([])
         setPlannedCount(0)
       }
+      setSuccessMessage('Vehicle deleted')
     } catch (reason) {
       setActionError(reason instanceof Error ? reason.message : 'Could not delete vehicle')
     } finally {
@@ -389,6 +381,7 @@ function Dashboard({ token, user, onLogout }: DashboardProps) {
       const result = await savePlannedRoute(selectedVehicle.vehicle_id, file, token)
       setPlannedCount(result.point_count)
       setRoute(result.points)
+      setSuccessMessage(`Route saved with ${result.point_count} points`)
     } catch (reason) {
       setActionError(reason instanceof Error ? reason.message : 'Could not save planned route')
     } finally {
@@ -413,10 +406,12 @@ function Dashboard({ token, user, onLogout }: DashboardProps) {
         const trip = await startTrip(vehicle.vehicle_id, token)
         updateTrip(vehicle.vehicle_id, trip.id)
         setForceDeviate(false)
+        setSuccessMessage('Trip started')
       } else {
         await stopTrip(vehicle.vehicle_id, token)
         updateTrip(vehicle.vehicle_id, null)
         setForceDeviate(false)
+        setSuccessMessage('Trip stopped')
       }
     } catch (reason) {
       setActionError(reason instanceof Error ? reason.message : 'Trip action failed')
@@ -437,6 +432,7 @@ function Dashboard({ token, user, onLogout }: DashboardProps) {
         !forceDeviate,
       )
       setForceDeviate(trip.force_deviate)
+      setSuccessMessage(trip.force_deviate ? 'Deviation mode enabled' : 'Back on planned route')
     } catch (reason) {
       setActionError(reason instanceof Error ? reason.message : 'Could not change deviation')
     } finally {
@@ -474,6 +470,15 @@ function Dashboard({ token, user, onLogout }: DashboardProps) {
         </div>
       </header>
 
+      {connection !== 'connected' && (
+        <div className={`connection-banner ${connection}`}>
+          {connection === 'connecting'
+            ? 'Connecting to live fleet updates…'
+            : 'Live connection lost — reconnecting…'}
+        </div>
+      )}
+      {successMessage && <div className="success-toast" role="status">{successMessage}</div>}
+
       <section className="dashboard-body">
         <aside className="sidebar">
           <div className="sidebar-heading">
@@ -501,7 +506,12 @@ function Dashboard({ token, user, onLogout }: DashboardProps) {
             <div><strong>{activeTrips}</strong><span>Active trips</span></div>
           </div>
 
-          {actionError && <div className="form-error compact">{actionError}</div>}
+          {actionError && (
+            <div className="form-error compact dismissible-error" role="alert">
+              <span>{actionError}</span>
+              <button type="button" onClick={() => setActionError('')} aria-label="Dismiss error">Dismiss</button>
+            </div>
+          )}
 
           {user.role === 'user' && (
             <form className="create-vehicle" onSubmit={handleCreateVehicle}>
@@ -521,7 +531,12 @@ function Dashboard({ token, user, onLogout }: DashboardProps) {
           )}
 
           <div className="vehicle-list">
-            {visibleVehicles.length === 0 && (
+            {vehiclesLoading && (
+              <div className="vehicle-skeletons" aria-label="Loading vehicles">
+                <span /><span /><span />
+              </div>
+            )}
+            {!vehiclesLoading && visibleVehicles.length === 0 && (
               <div className="empty-state">
                 <strong>No vehicles yet</strong>
                 <span>{user.role === 'user' ? 'Name a vehicle above, then save a route and start a trip.' : 'No vehicles in this view.'}</span>
@@ -533,7 +548,10 @@ function Dashboard({ token, user, onLogout }: DashboardProps) {
                 <button
                   key={vehicle.vehicle_id}
                   className={`vehicle-row ${selectedVehicleId === vehicle.vehicle_id ? 'selected' : ''}`}
-                  onClick={() => setSelectedVehicleId(vehicle.vehicle_id)}
+                  onClick={() => {
+                    setSelectedVehicleId(vehicle.vehicle_id)
+                    setVehicleCardOpen(true)
+                  }}
                 >
                   <span className={`status-dot ${online ? 'online' : 'offline'}`} />
                   <span className="vehicle-identity">
@@ -557,20 +575,41 @@ function Dashboard({ token, user, onLogout }: DashboardProps) {
             route={historyOpen ? historyRoute : route}
             historyTrail={trail}
             liveTrail={historyOpen ? null : liveTrail}
-            onSelect={setSelectedVehicleId}
+            onSelect={(vehicleId) => {
+              setSelectedVehicleId(vehicleId)
+              setVehicleCardOpen(true)
+            }}
             isOnline={isOnline}
           />
 
-          {selectedVehicle && !historyOpen && !adminOpen && (
+          {alerts[0] && !historyOpen && !adminOpen && (
+            <div className="live-alert" role="status">
+              <strong>Route deviation</strong>
+              <span>{alerts[0].message}</span>
+            </div>
+          )}
+
+          {selectedVehicle && vehicleCardOpen && !historyOpen && !adminOpen && (
             <article className="vehicle-card">
               <div className="vehicle-card-head">
                 <div className="vehicle-card-title">
                   <p className="eyebrow dark">{selectedVehicle.org_name ?? 'Fleet vehicle'}</p>
                   <h3>{selectedVehicle.name}</h3>
                 </div>
-                <span className={`state-badge ${isOnline(selectedVehicle) ? 'online' : 'offline'}`}>
-                  {isOnline(selectedVehicle) ? 'Online' : 'Offline'}
-                </span>
+                <div className="vehicle-card-actions">
+                  <span className={`state-badge ${isOnline(selectedVehicle) ? 'online' : 'offline'}`}>
+                    {isOnline(selectedVehicle) ? 'Online' : 'Offline'}
+                  </span>
+                  <button
+                    type="button"
+                    className="card-close"
+                    onClick={() => setVehicleCardOpen(false)}
+                    aria-label={`Close ${selectedVehicle.name} details`}
+                    title="Close vehicle details"
+                  >
+                    ×
+                  </button>
+                </div>
               </div>
 
               <div className="sensor-grid">
@@ -629,7 +668,7 @@ function Dashboard({ token, user, onLogout }: DashboardProps) {
                         />
                       </label>
                     </div>
-                    <p className="card-hint">
+                    <p className={plannedCount > 1 ? 'card-hint' : 'empty-route'}>
                       {plannedCount > 1
                         ? `Saved · ${plannedCount} points. Start a trip when you are ready.`
                         : 'Save a route first. A trip will not start until you do.'}

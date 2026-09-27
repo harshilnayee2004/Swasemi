@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 API_URL = os.getenv("SIMULATOR_API_URL", "http://127.0.0.1:8000").rstrip("/")
 EMAIL = os.getenv("SIMULATOR_EMAIL")
 PASSWORD = os.getenv("SIMULATOR_PASSWORD")
-VEHICLE_COUNT = int(os.getenv("SIMULATOR_VEHICLE_COUNT", "3"))
+POSITION_SPREAD = int(os.getenv("SIMULATOR_POSITION_SPREAD", "3"))
 PUBLISH_INTERVAL_SECONDS = float(os.getenv("SIMULATOR_INTERVAL_SECONDS", "2"))
 MAX_CYCLES = int(os.getenv("SIMULATOR_MAX_CYCLES", "0"))
 # Distance travelled per publish tick. 30 m every 2 s is roughly 55 km/h city driving.
@@ -46,13 +46,42 @@ MQTT_TOPIC_TEMPLATE = os.getenv(
 # at different points along it, so they look like a fleet on the same corridor.
 WAYPOINTS = [
     (23.2205, 72.6480),
+    (23.2205, 72.6510),
+    (23.2220, 72.6510),
+    (23.2220, 72.6545),
+    (23.2243, 72.6545),
     (23.2243, 72.6582),
+    (23.2255, 72.6582),
+    (23.2255, 72.6630),
+    (23.2277, 72.6630),
     (23.2277, 72.6715),
+    (23.2250, 72.6715),
+    (23.2250, 72.6740),
+    (23.2220, 72.6740),
+    (23.2220, 72.6760),
     (23.2170, 72.6760),
+    (23.2170, 72.6730),
+    (23.2145, 72.6730),
+    (23.2145, 72.6700),
+    (23.2115, 72.6700),
+    (23.2115, 72.6680),
+    (23.2075, 72.6680),
     (23.2075, 72.6660),
+    (23.2050, 72.6660),
+    (23.2050, 72.6610),
+    (23.2020, 72.6610),
     (23.2020, 72.6520),
+    (23.2040, 72.6520),
+    (23.2040, 72.6450),
+    (23.2060, 72.6450),
     (23.2060, 72.6380),
+    (23.2090, 72.6380),
     (23.2130, 72.6360),
+    (23.2130, 72.6400),
+    (23.2160, 72.6400),
+    (23.2160, 72.6440),
+    (23.2185, 72.6440),
+    (23.2185, 72.6480),
 ]
 
 
@@ -165,7 +194,7 @@ class SimulatedVehicle:
         self.device_id = vehicle["device_id"]
         self.route = BASE_ROUTE
         # Spread the fleet evenly around the loop.
-        self.position = (route_index * len(self.route) // max(1, VEHICLE_COUNT)) % len(self.route)
+        self.position = (route_index * len(self.route) // max(1, POSITION_SPREAD)) % len(self.route)
         self.sample_number = 0
         self.deviate_ticks = 0
 

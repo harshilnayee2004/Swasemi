@@ -2,6 +2,30 @@
 
 This document is the running engineering record for the assignment. Update it whenever the project changes. It explains what exists, why each decision was made, how data moves through the system, and what remains.
 
+## 1.2 UI/UX polish completed on 2026-09-27
+
+- Unified dashboard surfaces, action colors, spacing, borders, hover states, and overflow handling across the fleet sidebar, live map card, trip history, and Admin Console.
+- Added visible fleet loading skeletons, trip-history and reading loaders, clear empty states, a reconnecting banner, a selected-vehicle map cue, and a prominently surfaced route-deviation alert.
+- Added in-flight labels, disabled controls, dismissible inline errors, and brief success confirmations for dashboard and Admin Console actions without changing API calls, WebSocket behavior, or tenant/auth logic.
+- Checked the login layout at `1366x768` and added compact-height dashboard rules to preserve a clean laptop-sized review experience. The optional component refactor remains intentionally deferred.
+
+### Route corridor refinement
+
+- Replaced the coarse demo route chords with detailed street-grid corridor points for the Gandhinagar loop and Infocity corridor. The simulator and the bundled Gandhinagar KML use the same loop, so planned-route and live-trail geometry remain aligned.
+- Updated the map overlays with a white road-safe casing and green route markers for the planned route, plus a higher-contrast blue live-trail stroke and subtle trail halo.
+
+## 1.1 Audit remediation completed on 2026-09-27
+
+- Changed `start-all.ps1` to start only the Postgres and Redis Compose services; the local API, Vite app, and simulator continue to run in their own local processes. `docker compose up --build -d` remains the separate full-stack demo mode.
+- Removed seeded active trips. Fresh demo data contains the two demo vehicles but requires an operator to save a route and start a trip before telemetry is persisted.
+- Made database initialization fail startup instead of being logged and ignored. `/health` now checks both PostgreSQL and Redis and returns `503` with dependency status when either is unavailable.
+- Removed the Docker-only Nginx backend proxy. The frontend is configured exclusively with build-time `VITE_API_URL` and `VITE_WS_URL`, which supports a separately deployed frontend and API.
+- Kept the intentional non-deliverable demo email-domain filter and added a clear route-compliance warning when every organization recipient is filtered.
+- Renamed the simulator spacing setting to `SIMULATOR_POSITION_SPREAD`, documented all runtime settings in `.env.example`, removed unused schema/frontend wrappers, and made demo password hints explicit opt-in through `EXPOSE_DEMO_PASSWORD_HINTS`.
+- Added non-development JWT-secret enforcement, pinned backend dependencies, line-ending attributes, and an eight-test pytest suite covering login, tenant isolation, trip prerequisites, ingestion, and route alerts.
+- SMTP credential rotation is intentionally not automated: a new Gmail App Password must be generated in the Gmail account and placed only in the ignored local `backend/.env` file. No credential was read, copied, or committed during this remediation.
+- Skipped the optional Dashboard component split because it is cosmetic and risks the live demo close to deployment. Production-only MQTT ACLs, WebSocket re-authentication, JWT revocation, and upload limits remain intentionally deferred for the interview demo.
+
 ## 1. Assignment summary
 
 The application is a multi-tenant fleet telemetry platform:

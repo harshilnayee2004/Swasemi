@@ -69,22 +69,28 @@ export function TripHistory({
   const [readings, setReadings] = useState<Reading[]>([])
   const [error, setError] = useState('')
   const [exporting, setExporting] = useState(false)
+  const [tripsLoading, setTripsLoading] = useState(true)
+  const [readingsLoading, setReadingsLoading] = useState(false)
 
   useEffect(() => {
+    setTripsLoading(true)
     listTrips(vehicleId, token)
       .then((items) => {
         setTrips(items)
         setSelectedId(items[0]?.id ?? null)
       })
       .catch((reason) => setError(reason instanceof Error ? reason.message : 'Could not load trips'))
+      .finally(() => setTripsLoading(false))
   }, [token, vehicleId])
 
   useEffect(() => {
     if (selectedId === null) {
       setReadings([])
+      setReadingsLoading(false)
       onSelectTrip([], [])
       return
     }
+    setReadingsLoading(true)
     Promise.all([
       getReadings(vehicleId, selectedId, token),
       getRoute(vehicleId, selectedId, token).catch(() => ({ points: [] as RoutePoint[] })),
@@ -94,6 +100,7 @@ export function TripHistory({
         onSelectTrip(nextReadings, route.points)
       })
       .catch((reason) => setError(reason instanceof Error ? reason.message : 'Could not load trip'))
+      .finally(() => setReadingsLoading(false))
   }, [onSelectTrip, selectedId, token, vehicleId])
 
   async function exportCsv() {
@@ -121,10 +128,16 @@ export function TripHistory({
         <button type="button" className="text-button" onClick={onClose}>Close</button>
       </div>
 
-      {error && <div className="form-error compact">{error}</div>}
+      {error && (
+        <div className="form-error compact dismissible-error" role="alert">
+          <span>{error}</span>
+          <button type="button" onClick={() => setError('')} aria-label="Dismiss error">Dismiss</button>
+        </div>
+      )}
 
       <div className="history-trips">
-        {trips.length === 0 && <p className="muted">No trips recorded yet.</p>}
+        {tripsLoading && <div className="panel-loading"><span className="loader" /> Loading trips…</div>}
+        {!tripsLoading && trips.length === 0 && <p className="empty-copy">No trips recorded yet.</p>}
         {trips.map((trip) => (
           <button
             key={trip.id}
@@ -139,7 +152,13 @@ export function TripHistory({
 
       {selected && (
         <>
-          <TemperatureChart readings={readings} />
+          {readingsLoading ? (
+            <div className="panel-loading"><span className="loader" /> Loading readings…</div>
+          ) : readings.length === 0 ? (
+            <p className="empty-copy">No readings recorded for this trip yet.</p>
+          ) : (
+            <TemperatureChart readings={readings} />
+          )}
           <div className="history-actions">
             <span>{readings.length} readings · GPS trail on map</span>
             <button className="upload-button" onClick={exportCsv} disabled={exporting || readings.length === 0}>

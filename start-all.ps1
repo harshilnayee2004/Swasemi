@@ -41,7 +41,7 @@ Write-Host "[OK] Cleanup done." -ForegroundColor Green
 # ── 1. Start Docker (PostgreSQL + Redis) ─────────────────────────────
 Write-Host "`n[1/4] Starting Docker services (PostgreSQL & Redis)..." -ForegroundColor Yellow
 try {
-    & docker compose up -d
+    & docker compose up -d postgres redis
     if ($LASTEXITCODE -ne 0) { throw "docker compose exited with code $LASTEXITCODE" }
 } catch {
     Write-Host "`n[ERROR] Docker failed to start." -ForegroundColor Red

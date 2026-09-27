@@ -226,10 +226,20 @@ export function FleetMap({
         <ZoomControls />
 
         {routePath.length >= 2 && (
-          <Polyline
-            positions={routePath}
-            pathOptions={{ color: '#188038', weight: 7, opacity: 0.38, lineCap: 'round', lineJoin: 'round' }}
-          />
+          <>
+            <Polyline
+              positions={routePath}
+              pathOptions={{ color: '#ffffff', weight: 12, opacity: 0.94, lineCap: 'round', lineJoin: 'round' }}
+            />
+            <Polyline
+              positions={routePath}
+              pathOptions={{ color: '#177e55', weight: 6, opacity: 0.9, lineCap: 'round', lineJoin: 'round', dashArray: '1 10' }}
+            />
+            <Polyline
+              positions={routePath}
+              pathOptions={{ color: '#75d5a7', weight: 2, opacity: 1, lineCap: 'round', lineJoin: 'round' }}
+            />
+          </>
         )}
         {historyPath.length >= 2 && (
           <Polyline
@@ -241,13 +251,13 @@ export function FleetMap({
           <>
             <Polyline
               positions={livePath}
-              pathOptions={{ color: '#ffffff', weight: 11, opacity: 0.95, lineCap: 'round', lineJoin: 'round' }}
+              pathOptions={{ color: '#123f71', weight: 13, opacity: 0.22, lineCap: 'round', lineJoin: 'round' }}
             />
             <Polyline
               positions={livePath}
               pathOptions={{
-                color: liveTrail?.ended ? '#5f6368' : '#1a73e8',
-                weight: 6,
+                color: liveTrail?.ended ? '#637169' : '#1476d4',
+                weight: 7,
                 opacity: 1,
                 lineCap: 'round',
                 lineJoin: 'round',
@@ -307,6 +317,14 @@ export function FleetMap({
                 : 'Start a trip to draw the route'}
         </small>
       </div>
+      {selected && (
+        <div className="map-selection" aria-live="polite">
+          <span className={`status-dot ${isOnline(selected) ? 'online' : 'offline'}`} />
+          <span>
+            {selected.trip_id === null ? 'Selected' : 'Tracking'} <strong>{selected.name}</strong>
+          </span>
+        </div>
+      )}
     </div>
   )
 }

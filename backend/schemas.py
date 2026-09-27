@@ -14,12 +14,6 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
 
 
-class TokenPayload(BaseModel):
-    sub: int
-    role: str
-    org_id: Optional[int] = None
-
-
 class OrganizationCreate(BaseModel):
     name: str
 

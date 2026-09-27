@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
-from emailer import send_email
+from emailer import deliverable_recipients, send_email
 from geo import distance_to_route_m
 from models import Alert, Organization, RoutePoint, Trip, User, Vehicle
 from realtime import alert_payload, publish_telemetry
@@ -80,6 +80,10 @@ def evaluate_route_compliance(
         f"Trip ID: {trip.id}\n"
         f"Position: {latitude:.6f}, {longitude:.6f}\n"
     )
+    if recipients and not deliverable_recipients(recipients):
+        logger.warning(
+            "Alert created but no email sent - all org users have a non-deliverable demo email domain"
+        )
     try:
         if send_email(recipients, f"Route deviation: {vehicle.name}", body):
             alert.emailed_at = datetime.now(timezone.utc)

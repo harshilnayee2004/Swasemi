@@ -60,12 +60,6 @@ def seed_initial_data(db: Session) -> None:
         db.add(vehicle_a)
         db.flush()
 
-        trip_a = models.Trip(
-            vehicle_id=vehicle_a.id,
-            org_id=org_a.id,
-            status="active",
-        )
-        db.add(trip_a)
 
     # Check if Org B exists
     org_b = db.query(models.Organization).filter_by(name="Transporter Beta").first()
@@ -95,12 +89,6 @@ def seed_initial_data(db: Session) -> None:
         db.add(vehicle_b)
         db.flush()
 
-        trip_b = models.Trip(
-            vehicle_id=vehicle_b.id,
-            org_id=org_b.id,
-            status="active",
-        )
-        db.add(trip_b)
 
     db.commit()
 

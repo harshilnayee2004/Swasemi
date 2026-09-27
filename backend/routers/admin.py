@@ -21,6 +21,11 @@ from schemas import (
 )
 
 INVITE_HOURS = int(os.getenv("INVITE_EXPIRE_HOURS", "72"))
+EXPOSE_DEMO_PASSWORD_HINTS = os.getenv("EXPOSE_DEMO_PASSWORD_HINTS", "false").lower() in {
+    "1",
+    "true",
+    "yes",
+}
 
 DEMO_PASSWORDS = {
     "admin@example.com": "adminpass",
@@ -151,7 +156,7 @@ def list_all_users(
     )
     users_out = []
     for user, org_name in results:
-        hint = DEMO_PASSWORDS.get(user.email.lower())
+        hint = DEMO_PASSWORDS.get(user.email.lower()) if EXPOSE_DEMO_PASSWORD_HINTS else None
         users_out.append(
             UserWithOrgOut(
                 id=user.id,

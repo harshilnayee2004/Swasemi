@@ -14,10 +14,11 @@ import type {
   VehicleRecord,
 } from './types'
 
-export const API_URL = (import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000').replace(/\/$/, '')
-export const WS_URL =
-  import.meta.env.VITE_WS_URL ??
-  `${API_URL.replace(/^http/, 'ws')}/ws`
+const configuredApiUrl = import.meta.env.VITE_API_URL?.trim()
+const configuredWsUrl = import.meta.env.VITE_WS_URL?.trim()
+
+export const API_URL = (configuredApiUrl || 'http://127.0.0.1:8000').replace(/\/$/, '')
+export const WS_URL = configuredWsUrl || `${API_URL.replace(/^http/, 'ws')}/ws`
 
 async function request<T>(
   path: string,
@@ -93,10 +94,6 @@ export async function deleteOrganization(orgId: number, token: string) {
 
 export function listAllUsers(token: string) {
   return request<UserWithOrg[]>('/admin/users', {}, token)
-}
-
-export function listOrganizationUsers(orgId: number, token: string) {
-  return request<CurrentUser[]>(`/admin/organizations/${orgId}/users`, {}, token)
 }
 
 export function createInvite(orgId: number, token: string, email?: string) {
@@ -222,15 +219,6 @@ export function setTripDeviate(vehicleId: number, tripId: number, token: string,
     ? `/vehicles/${vehicleId}/trips/${tripId}/deviate`
     : `/vehicles/${vehicleId}/trips/${tripId}/deviate/reset`
   return request<Trip>(path, { method: 'POST' }, token)
-}
-
-export function uploadRoute(vehicleId: number, tripId: number, file: File, token: string) {
-  return postRouteFile(
-    `/vehicles/${vehicleId}/trips/${tripId}/route`,
-    file,
-    token,
-    'Could not upload route',
-  ) as Promise<RouteOut>
 }
 
 export function getRoute(vehicleId: number, tripId: number, token: string) {
