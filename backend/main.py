@@ -15,6 +15,7 @@ from routers.admin import router as admin_router
 from routers.trips import router as trips_router
 from routers.vehicles import router as vehicles_router
 from routers.ws import router as ws_router
+from routers.sim import router as sim_router
 
 logging.basicConfig(level=logging.INFO)
 
@@ -34,6 +35,9 @@ async def lifespan(app: FastAPI):
             await fanout_task
         except asyncio.CancelledError:
             pass
+        import live_sim
+
+        live_sim.shutdown()
         stop_mqtt()
 
 
@@ -56,6 +60,7 @@ app.include_router(auth_router)
 app.include_router(admin_router)
 app.include_router(vehicles_router)
 app.include_router(trips_router)
+app.include_router(sim_router)
 app.include_router(ws_router)
 
 

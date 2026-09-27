@@ -53,6 +53,12 @@ export interface TokenResponse {
   token_type: string
 }
 
+export interface SimulatorStatus {
+  vehicle_id: number
+  running: boolean
+  trip_id: number | null
+}
+
 export interface Trip {
   id: number
   vehicle_id: number

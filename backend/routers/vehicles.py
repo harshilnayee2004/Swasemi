@@ -86,6 +86,9 @@ def delete_vehicle(
     db.query(VehicleRoutePoint).filter(VehicleRoutePoint.vehicle_id == vehicle.id).delete(
         synchronize_session=False
     )
+    import live_sim
+
+    live_sim.stop_vehicle(vehicle.id)
     db.delete(vehicle)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

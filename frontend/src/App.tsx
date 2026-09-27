@@ -14,7 +14,10 @@ import {
   login,
   savePlannedRoute,
   setTripDeviate,
+  startSimulator,
   startTrip,
+  stopSimulator,
+  getSimulator,
   stopTrip,
 } from './api'
 import { FleetMap } from './FleetMap'
@@ -191,6 +194,8 @@ function Dashboard({ token, user, onLogout }: DashboardProps) {
   const [newVehicleName, setNewVehicleName] = useState('')
   const [createBusy, setCreateBusy] = useState(false)
   const [deleteBusy, setDeleteBusy] = useState(false)
+  const [simRunning, setSimRunning] = useState(false)
+  const [simBusy, setSimBusy] = useState(false)
   const [trail, setTrail] = useState<Reading[]>([])
   const [historyRoute, setHistoryRoute] = useState<RoutePoint[]>([])
 
@@ -328,6 +333,40 @@ function Dashboard({ token, user, onLogout }: DashboardProps) {
       .catch(() => undefined)
   }, [seedTrail, selectedVehicle?.trip_id, selectedVehicle?.vehicle_id, setAlerts, token])
 
+  useEffect(() => {
+    if (!selectedVehicle || user.role !== 'user') {
+      setSimRunning(false)
+      return
+    }
+    const vehicleId = selectedVehicle.vehicle_id
+    const refresh = () =>
+      getSimulator(vehicleId, token)
+        .then((status) => setSimRunning(status.running))
+        .catch(() => setSimRunning(false))
+    refresh()
+    const timer = window.setInterval(refresh, 8000)
+    return () => window.clearInterval(timer)
+  }, [selectedVehicle?.vehicle_id, token, user.role])
+
+  async function handleToggleSimulator(vehicle: LiveVehicle) {
+    setSimBusy(true)
+    setActionError('')
+    try {
+      const status = simRunning
+        ? await stopSimulator(vehicle.vehicle_id, token)
+        : await startSimulator(vehicle.vehicle_id, token)
+      setSimRunning(status.running)
+      if (status.trip_id) {
+        updateTrip(vehicle.vehicle_id, status.trip_id)
+      }
+      setSuccessMessage(status.running ? 'Simulator streaming live GPS' : 'Simulator stopped')
+    } catch (reason) {
+      setActionError(reason instanceof Error ? reason.message : 'Could not change simulator')
+    } finally {
+      setSimBusy(false)
+    }
+  }
+
   async function handleCreateVehicle(event: FormEvent) {
     event.preventDefault()
     const name = newVehicleName.trim()
@@ -464,6 +503,16 @@ function Dashboard({ token, user, onLogout }: DashboardProps) {
           {user.role === 'super_admin' && (
             <button type="button" className="text-button" onClick={() => { setAdminOpen(true); setHistoryOpen(false) }}>
               Admin
+            </button>
+          )}
+          {user.role === 'user' && selectedVehicle && (
+            <button
+              type="button"
+              className="text-button"
+              onClick={() => handleToggleSimulator(selectedVehicle)}
+              disabled={simBusy}
+            >
+              {simBusy ? 'Working…' : simRunning ? 'Stop simulator' : 'Start simulator'}
             </button>
           )}
           <button type="button" className="text-button" onClick={onLogout}>Sign out</button>
@@ -620,6 +669,16 @@ function Dashboard({ token, user, onLogout }: DashboardProps) {
               </div>
 
               <section className="card-step">
+                {user.role === 'user' && (
+                  <button
+                    type="button"
+                    className={`trip-button ${simRunning ? 'stop' : 'start'}`}
+                    onClick={() => handleToggleSimulator(selectedVehicle)}
+                    disabled={simBusy}
+                  >
+                    {simBusy ? 'Working…' : simRunning ? 'Stop simulator' : 'Start simulator'}
+                  </button>
+                )}
                 <div className="card-step-head">
                   <span>Trip</span>
                   <strong>

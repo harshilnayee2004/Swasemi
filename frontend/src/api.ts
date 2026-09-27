@@ -8,6 +8,7 @@ import type {
   PlatformStats,
   Reading,
   RouteOut,
+  SimulatorStatus,
   TokenResponse,
   Trip,
   UserWithOrg,
@@ -206,6 +207,18 @@ export function savePlannedRoute(vehicleId: number, file: File, token: string) {
 
 export function getPlannedRoute(vehicleId: number, token: string) {
   return request<PlannedRouteOut>(`/vehicles/${vehicleId}/planned-route`, {}, token)
+}
+
+export function getSimulator(vehicleId: number, token: string) {
+  return request<SimulatorStatus>(`/vehicles/${vehicleId}/simulator`, {}, token)
+}
+
+export function startSimulator(vehicleId: number, token: string) {
+  return request<SimulatorStatus>(`/vehicles/${vehicleId}/simulator/start`, { method: 'POST' }, token)
+}
+
+export function stopSimulator(vehicleId: number, token: string) {
+  return request<SimulatorStatus>(`/vehicles/${vehicleId}/simulator/stop`, { method: 'POST' }, token)
 }
 
 export function startTrip(vehicleId: number, token: string) {

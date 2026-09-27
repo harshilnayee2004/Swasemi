@@ -562,7 +562,7 @@ Swasemi is a multi-tenant fleet telemetry platform.
 - A Super Admin sees every organization, views platform analytics, manages users/orgs/invites, and cannot start or stop trips.
 - There is no public signup. Join is invite-only (`/?invite=...`).
 - A vehicle only stores GPS and sensor samples while a User has started a trip.
-- Simulated devices publish over public MQTT (`broker.emqx.io`). The API writes accepted samples to PostgreSQL, publishes a live event through Redis, and the dashboard receives that event on a WebSocket.
+- Simulated devices can still publish over public MQTT (`broker.emqx.io`). On Vercel/Render there is no separate simulator process: **Start simulator** on the dashboard runs the same GPS loop inside the API and feeds `ingest_telemetry`, so the map streams without a laptop running `simulator.py`.
 
 Required story for an interviewer: **MQTT → active trip gate in FastAPI → PostgreSQL + Redis → WebSocket → React map**.
 
