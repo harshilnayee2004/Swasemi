@@ -188,6 +188,7 @@ function Dashboard({ token, user, onLogout }: DashboardProps) {
   const [routeBusy, setRouteBusy] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [adminOpen, setAdminOpen] = useState(false)
+  const [dismissedAlertIds, setDismissedAlertIds] = useState<number[]>([])
   const [namedRouteId, setNamedRouteId] = useState(NAMED_ROUTES[0].id)
   const [forceDeviate, setForceDeviate] = useState(false)
   const [deviateBusy, setDeviateBusy] = useState(false)
@@ -256,7 +257,8 @@ function Dashboard({ token, user, onLogout }: DashboardProps) {
     visibleVehicles.find((vehicle) => vehicle.vehicle_id === selectedVehicleId) ?? null
   const onlineCount = visibleVehicles.filter(isOnline).length
   const activeTrips = visibleVehicles.filter((vehicle) => vehicle.trip_id !== null).length
-  const vehicleAlerts = alerts.filter(
+  const visibleAlerts = alerts.filter((alert) => !dismissedAlertIds.includes(alert.id))
+  const vehicleAlerts = visibleAlerts.filter(
     (alert) =>
       selectedVehicle !== null &&
       selectedVehicle.trip_id !== null &&
@@ -478,8 +480,7 @@ function Dashboard({ token, user, onLogout }: DashboardProps) {
         setSuccessMessage(`Deviation started. Alert email sent to ${inbox}`)
       } else {
         setActionError(
-          trip.email_error
-            || 'Deviation is on, but email was not sent. Render blocks Gmail SMTP — add RESEND_API_KEY.',
+          'Deviation is on, but no email was sent. On Render set SMTP_HOST, SMTP_USERNAME, SMTP_PASSWORD, and ALERT_TO_EMAIL to a real Gmail address.',
         )
       }
     } catch (reason) {
@@ -511,8 +512,15 @@ function Dashboard({ token, user, onLogout }: DashboardProps) {
             <small>{user.role === 'super_admin' ? 'Super Admin · Platform' : 'Fleet User'}</small>
           </div>
           {user.role === 'super_admin' && (
-            <button type="button" className="text-button" onClick={() => { setAdminOpen(true); setHistoryOpen(false) }}>
-              Admin
+            <button
+              type="button"
+              className={adminOpen ? 'nav-button' : 'text-button'}
+              onClick={() => {
+                setAdminOpen((open) => !open)
+                setHistoryOpen(false)
+              }}
+            >
+              {adminOpen ? 'Dashboard' : 'Admin'}
             </button>
           )}
           {user.role === 'user' && selectedVehicle && (
@@ -641,10 +649,21 @@ function Dashboard({ token, user, onLogout }: DashboardProps) {
             isOnline={isOnline}
           />
 
-          {alerts[0] && !historyOpen && !adminOpen && (
+          {visibleAlerts[0] && !historyOpen && (
             <div className="live-alert" role="status">
-              <strong>Route deviation</strong>
-              <span>{alerts[0].message}</span>
+              <div>
+                <strong>Route deviation</strong>
+                <span>{visibleAlerts[0].message}</span>
+              </div>
+              <button
+                type="button"
+                className="card-close"
+                onClick={() => setDismissedAlertIds((ids) => [...ids, visibleAlerts[0].id])}
+                aria-label="Dismiss alert"
+                title="Dismiss alert"
+              >
+                ×
+              </button>
             </div>
           )}
 
@@ -679,16 +698,6 @@ function Dashboard({ token, user, onLogout }: DashboardProps) {
               </div>
 
               <section className="card-step">
-                {user.role === 'user' && (
-                  <button
-                    type="button"
-                    className={`trip-button ${simRunning ? 'stop' : 'start'}`}
-                    onClick={() => handleToggleSimulator(selectedVehicle)}
-                    disabled={simBusy}
-                  >
-                    {simBusy ? 'Working…' : simRunning ? 'Stop simulator' : 'Start simulator'}
-                  </button>
-                )}
                 <div className="card-step-head">
                   <span>Trip</span>
                   <strong>
@@ -699,6 +708,17 @@ function Dashboard({ token, user, onLogout }: DashboardProps) {
                         : `Active · moving · #${selectedVehicle.trip_id}`}
                   </strong>
                 </div>
+
+                {user.role === 'user' && (
+                  <button
+                    type="button"
+                    className={`trip-button ${simRunning ? 'stop' : 'start'}`}
+                    onClick={() => handleToggleSimulator(selectedVehicle)}
+                    disabled={simBusy}
+                  >
+                    {simBusy ? 'Working…' : simRunning ? 'Stop simulator' : 'Start simulator'}
+                  </button>
+                )}
 
                 {user.role === 'user' && selectedVehicle.trip_id === null && (
                   <>
@@ -779,7 +799,7 @@ function Dashboard({ token, user, onLogout }: DashboardProps) {
                         onClick={toggleDeviate}
                         disabled={deviateBusy}
                       >
-                        {deviateBusy ? 'Working…' : forceDeviate ? 'Deviating' : 'Deviate'}
+                        {deviateBusy ? 'Working…' : forceDeviate ? 'Back on route' : 'Deviate'}
                       </button>
                     </div>
                   </>
@@ -809,9 +829,20 @@ function Dashboard({ token, user, onLogout }: DashboardProps) {
 
               {vehicleAlerts[0] && (
                 <div className="alert-banner">
-                  <strong>Route deviation</strong>
-                  <span>{vehicleAlerts[0].message}</span>
-                  {vehicleAlerts[0].emailed_at && <small>Email sent</small>}
+                  <div>
+                    <strong>Route deviation</strong>
+                    <span>{vehicleAlerts[0].message}</span>
+                    {vehicleAlerts[0].emailed_at && <small>Email sent</small>}
+                  </div>
+                  <button
+                    type="button"
+                    className="card-close"
+                    onClick={() => setDismissedAlertIds((ids) => [...ids, vehicleAlerts[0].id])}
+                    aria-label="Dismiss alert"
+                    title="Dismiss alert"
+                  >
+                    ×
+                  </button>
                 </div>
               )}
 

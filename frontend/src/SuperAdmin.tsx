@@ -218,31 +218,26 @@ export function SuperAdmin({ token, onClose }: SuperAdminProps) {
   }, [copied, success])
 
   return (
-    <aside
-      className="admin-panel"
-      style={{
-        width: isMaximized ? '88vw' : '460px',
-        maxWidth: '96vw',
-        overflowY: 'auto',
-        transition: 'width 0.25s ease-in-out',
-        boxShadow: isMaximized ? '0 0 40px rgba(0,0,0,0.3)' : undefined,
-      }}
-    >
-      <div className="history-head">
+    <aside className={`admin-panel ${isMaximized ? 'maximized' : ''}`}>
+      <div className="history-head admin-toolbar">
         <div>
           <p className="eyebrow dark">Control Center</p>
           <h3>Super Admin Console</h3>
         </div>
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+        <div className="admin-toolbar-actions">
+          <button type="button" className="nav-button" onClick={onClose}>
+            Dashboard
+          </button>
           <button
             type="button"
             className="text-button"
             onClick={() => setIsMaximized((prev) => !prev)}
-            style={{ fontWeight: 600, color: '#2b6cb0', fontSize: '13px' }}
           >
-            {isMaximized ? '🗗 Restore View' : '⛶ Maximize View'}
+            {isMaximized ? 'Restore' : 'Widen'}
           </button>
-          <button type="button" className="text-button" onClick={onClose}>Close</button>
+          <button type="button" className="card-close" onClick={onClose} aria-label="Close admin console" title="Close">
+            ×
+          </button>
         </div>
       </div>
 
