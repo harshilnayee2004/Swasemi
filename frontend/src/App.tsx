@@ -512,7 +512,7 @@ function Dashboard({ token, user, onLogout }: DashboardProps) {
             <small>{user.role === 'super_admin' ? 'Super Admin · Platform' : 'Fleet User'}</small>
           </div>
           {user.role === 'super_admin' && (
-            <>
+            adminOpen ? (
               <button
                 type="button"
                 className="nav-button"
@@ -523,9 +523,10 @@ function Dashboard({ token, user, onLogout }: DashboardProps) {
               >
                 Dashboard
               </button>
+            ) : (
               <button
                 type="button"
-                className="text-button"
+                className="nav-button"
                 onClick={() => {
                   setAdminOpen(true)
                   setHistoryOpen(false)
@@ -533,7 +534,7 @@ function Dashboard({ token, user, onLogout }: DashboardProps) {
               >
                 Admin
               </button>
-            </>
+            )
           )}
           {user.role === 'user' && selectedVehicle && (
             <button
@@ -882,7 +883,15 @@ function Dashboard({ token, user, onLogout }: DashboardProps) {
             </article>
           )}
           {adminOpen && user.role === 'super_admin' && (
-            <SuperAdmin token={token} onClose={() => setAdminOpen(false)} />
+            <>
+              <button
+                type="button"
+                className="admin-backdrop"
+                aria-label="Close admin and return to dashboard"
+                onClick={() => setAdminOpen(false)}
+              />
+              <SuperAdmin token={token} onClose={() => setAdminOpen(false)} />
+            </>
           )}
           {historyOpen && selectedVehicle && (
             <TripHistory

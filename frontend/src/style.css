@@ -172,6 +172,8 @@ button:disabled { cursor: wait; opacity: 0.58; }
 .dashboard { height: 100vh; overflow: hidden; background: #e9eeea; }
 .topbar {
   display: flex;
+  position: relative;
+  z-index: 1000;
   height: 70px;
   align-items: center;
   justify-content: space-between;
@@ -551,6 +553,15 @@ button:disabled { cursor: wait; opacity: 0.58; }
   border-radius: 18px;
   background: rgb(255 255 255 / 96%);
   box-shadow: 0 16px 40px rgb(24 51 39 / 18%);
+}
+.admin-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 518;
+  padding: 0;
+  border: 0;
+  background: rgb(24 51 39 / 28%);
+  cursor: pointer;
 }
 .admin-panel { overflow-y: auto; }
 .admin-panel.maximized { width: min(880px, calc(100% - 32px)); }
