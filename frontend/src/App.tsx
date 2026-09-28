@@ -514,7 +514,7 @@ function Dashboard({ token, user, onLogout }: DashboardProps) {
           {user.role === 'super_admin' && (
             <button
               type="button"
-              className={adminOpen ? 'nav-button' : 'text-button'}
+              className="nav-button"
               onClick={() => {
                 setAdminOpen((open) => !open)
                 setHistoryOpen(false)

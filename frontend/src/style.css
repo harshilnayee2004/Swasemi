@@ -179,7 +179,7 @@ button:disabled { cursor: wait; opacity: 0.58; }
   border-bottom: 1px solid #dbe2dd;
   background: #fff;
 }
-.topbar-actions { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; justify-content: flex-end; }
+.topbar-actions { display: flex; align-items: center; gap: 12px; flex-wrap: nowrap; justify-content: flex-end; min-width: 0; }
 .connection-pill, .state-badge {
   display: inline-flex;
   align-items: center;
