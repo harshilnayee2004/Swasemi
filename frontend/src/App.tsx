@@ -512,16 +512,28 @@ function Dashboard({ token, user, onLogout }: DashboardProps) {
             <small>{user.role === 'super_admin' ? 'Super Admin · Platform' : 'Fleet User'}</small>
           </div>
           {user.role === 'super_admin' && (
-            <button
-              type="button"
-              className="nav-button"
-              onClick={() => {
-                setAdminOpen((open) => !open)
-                setHistoryOpen(false)
-              }}
-            >
-              {adminOpen ? 'Dashboard' : 'Admin'}
-            </button>
+            <>
+              <button
+                type="button"
+                className="nav-button"
+                onClick={() => {
+                  setAdminOpen(false)
+                  setHistoryOpen(false)
+                }}
+              >
+                Dashboard
+              </button>
+              <button
+                type="button"
+                className="text-button"
+                onClick={() => {
+                  setAdminOpen(true)
+                  setHistoryOpen(false)
+                }}
+              >
+                Admin
+              </button>
+            </>
           )}
           {user.role === 'user' && selectedVehicle && (
             <button
